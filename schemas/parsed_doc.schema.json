@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eoditdeora.dev/schemas/parsed_doc.schema.json",
+  "title": "ParsedDoc",
+  "description": "Common output schema for every parser in Eoditdeora. All parsers MUST emit this shape regardless of source format.",
+  "type": "object",
+  "required": ["doc_id", "source_path", "format", "parser", "fidelity", "blocks"],
+  "properties": {
+    "doc_id": {
+      "type": "string",
+      "description": "SHA-256 content hash of the original file. Stable across renames.",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "source_path": {
+      "type": "string",
+      "description": "Absolute path to the original file. POSIX-style internally (converted from Windows \\\\ on collection)."
+    },
+    "source_path_display": {
+      "type": "string",
+      "description": "OS-native path string for UI display (Windows uses backslashes)."
+    },
+    "format": {
+      "type": "string",
+      "enum": [
+        "hwp", "hwpx", "pdf", "docx", "doc", "xlsx", "xls", "pptx",
+        "txt", "md", "csv", "json", "image", "eml", "msg", "html", "unknown"
+      ]
+    },
+    "parser": {
+      "type": "string",
+      "description": "Identifier of the parser implementation that produced this output (e.g., 'hwpx_native', 'pyhwp', 'pypdfium2').",
+      "examples": ["hwpx_native", "pyhwp", "pdf_pdfplumber", "docx_python_docx"]
+    },
+    "fidelity": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5,
+      "description": "Self-reported parse fidelity: 1=filename only, 5=lossless structural + semantic."
+    },
+    "blocks": {
+      "type": "array",
+      "description": "Ordered content blocks of the document. Preserve reading order.",
+      "items": { "$ref": "#/$defs/Block" }
+    },
+    "images": {
+      "type": "array",
+      "description": "Embedded images extracted from the doc.",
+      "items": { "$ref": "#/$defs/Image" },
+      "default": []
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Document-level metadata extracted from the file (author, dates, application, etc.)",
+      "properties": {
+        "author": { "type": ["string", "null"] },
+        "created_at": { "type": ["string", "null"], "format": "date-time" },
+        "modified_at": { "type": ["string", "null"], "format": "date-time" },
+        "page_count": { "type": ["integer", "null"] },
+        "application": { "type": ["string", "null"] },
+        "language_hint": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "warnings": {
+      "type": "array",
+      "description": "Non-fatal issues encountered during parsing. Surface to user so they can understand missing content.",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "parse_ms": {
+      "type": "integer",
+      "description": "Wall-clock ms spent parsing. Used for perf telemetry (local only)."
+    }
+  },
+  "$defs": {
+    "Block": {
+      "type": "object",
+      "required": ["type", "text"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "heading", "paragraph", "table", "list_item", "code",
+            "footnote", "caption", "image_ref", "formula", "quote", "other"
+          ]
+        },
+        "text": { "type": "string" },
+        "level": {
+          "type": "integer",
+          "description": "Heading level (1-6) when type=heading."
+        },
+        "page": {
+          "type": ["integer", "null"],
+          "description": "Page number (1-indexed) where this block appears. Null for formats without pages."
+        },
+        "sheet": {
+          "type": ["string", "null"],
+          "description": "Sheet name for spreadsheet blocks."
+        },
+        "bbox": {
+          "type": ["array", "null"],
+          "description": "[x0, y0, x1, y1] bounding box in source coordinates. Used for UI highlight.",
+          "items": { "type": "number" },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "meta": {
+          "type": "object",
+          "description": "Free-form block metadata (e.g., table row/col dimensions, list marker style).",
+          "additionalProperties": true
+        }
+      }
+    },
+    "Image": {
+      "type": "object",
+      "required": ["id", "cache_path"],
+      "properties": {
+        "id": { "type": "string" },
+        "cache_path": {
+          "type": "string",
+          "description": "Absolute path to extracted image in local thumbnail cache."
+        },
+        "width": { "type": "integer" },
+        "height": { "type": "integer" },
+        "caption": {
+          "type": ["string", "null"],
+          "description": "VLM-generated caption; populated by Understander stage, not parser."
+        },
+        "ocr_text": {
+          "type": ["string", "null"],
+          "description": "OCR-extracted text; populated later."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Eoditdeora",
+  "identifier": "ai.markr.eoditdeora",
+  "version": "0.1.0",
+  "build": {
+    "beforeDevCommand": "pnpm --filter eoditdeora-ui dev",
+    "beforeBuildCommand": "pnpm --filter eoditdeora-ui build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../ui/build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "어딨더라",
+        "width": 920,
+        "height": 620,
+        "minWidth": 640,
+        "minHeight": 420,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "deb", "rpm", "appimage"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Productivity",
+    "shortDescription": "Eoditdeora (어딨더라) - local document knowledge base",
+    "longDescription": "Offline personal document search and RAG over your HWP, HWPX, PDF, DOC, DOCX, XLSX, PPTX files.",
+    "externalBin": ["bin/eoditdeora-core"],
+    "resources": []
+  }
+}

@@ -1,0 +1,42 @@
+# Default ignore patterns for Eoditdeora
+# Uses gitignore syntax. Copy to .eoditdeora.ignore in any watched root to customize.
+
+# Development
+node_modules/
+.git/
+.svn/
+.hg/
+target/
+dist/
+build/
+__pycache__/
+.venv/
+venv/
+*.pyc
+*.o
+*.obj
+
+# Temporary / system
+~$*
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
+*.temp
+*.bak
+*.swp
+.Trash/
+$RECYCLE.BIN/
+
+# Binaries / media (usually not the target)
+*.iso
+*.dmg
+*.vmdk
+*.qcow2
+
+# Lockfiles
+*.lock
+
+# Eoditdeora itself
+.eoditdeora.local/
+~/.eoditdeora/

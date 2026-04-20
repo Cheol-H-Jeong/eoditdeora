@@ -1,0 +1,16 @@
+{
+  "name": "eoditdeora-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "license": "AGPL-3.0-or-later",
+  "scripts": {
+    "dev": "pnpm -C apps/ui run dev",
+    "tauri:dev": "cd apps/shell && cargo tauri dev",
+    "tauri:build": "cd apps/shell && cargo tauri build",
+    "core:serve": "python3 -m eoditdeora.api.rpc_server",
+    "core:test": "pytest core/tests"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.2.0"
+  }
+}

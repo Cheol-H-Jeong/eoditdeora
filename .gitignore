@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+dist/
+build/
+*.spec
+
+# Node / Tauri
+node_modules/
+apps/ui/.svelte-kit/
+apps/ui/build/
+apps/shell/target/
+apps/shell/gen/
+apps/shell/Cargo.lock
+
+# Models & runtime artifacts (downloaded on first run)
+runtimes/llama_cpp/bin/
+runtimes/llama_cpp/models/
+*.gguf
+
+# Local user data
+~/.eoditdeora/
+.eoditdeora.local/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+
+# Installer outputs
+installers/**/out/
+*.msi
+*.AppImage
+*.deb
+*.rpm
+*.dmg
