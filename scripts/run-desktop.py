@@ -35,7 +35,7 @@ import webview  # noqa: E402
 # Reuse the bridge handler we already built.
 from importlib import import_module as _imp  # noqa: E402
 
-_dev = _imp("dev-server")  # scripts/dev-server.py
+_dev = _imp("dev_server")  # scripts/dev_server.py
 
 from eoditdeora.indexer.daemon import get_daemon  # noqa: E402
 

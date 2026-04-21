@@ -35,17 +35,18 @@ hiddenimports += collect_submodules("pypdfium2")
 hiddenimports += collect_submodules("hwp5")
 hiddenimports += collect_submodules("PyQt6")
 hiddenimports += collect_submodules("webview")
+hiddenimports += ["dev_server"]
 
 datas = []
 datas += collect_data_files("kiwipiepy")
 datas += collect_data_files("pypdfium2")
 datas += collect_data_files("webview")
 datas += [(str(ROOT / "apps" / "ui" / "build"), "apps/ui/build")]
-datas += [(str(ROOT / "scripts" / "dev-server.py"), "scripts")]
+datas += [(str(ROOT / "scripts" / "dev_server.py"), "scripts")]
 
 a = Analysis(
     [str(ROOT / "apps" / "launcher" / "eoditdeora_launcher.py")],
-    pathex=[str(ROOT / "core")],
+    pathex=[str(ROOT / "core"), str(ROOT / "scripts")],
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,
@@ -66,6 +67,7 @@ exe = EXE(
     disable_windowed_traceback=False,
     argv_emulation=False,
     icon=str(SPEC_DIR / "icon.ico"),
+    version=str(SPEC_DIR / "version_info.txt"),
 )
 coll = COLLECT(
     exe,

@@ -104,7 +104,7 @@ jobs:
       - name: Build AppImage
         run: |
           pnpm install
-          bash installers/linux/build-appimage.sh 0.1.0
+          bash installers/linux/build-appimage.sh 0.1.1
 
       - name: Upload Linux installer
         uses: actions/upload-artifact@v4
@@ -168,7 +168,7 @@ jobs:
         shell: pwsh
         run: |
           pnpm install
-          .\installers\windows\build-installer.ps1 -Version 0.1.0
+          .\installers\windows\build-installer.ps1 -Version 0.1.1
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4

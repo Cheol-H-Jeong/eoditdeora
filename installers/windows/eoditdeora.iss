@@ -5,18 +5,28 @@
 
 #define AppId         "{{4B0F8B2E-4D6C-4E6E-9C1E-EODITDEORA-0001}"
 #define AppName       "Eoditdeora"
-#define AppDisplay    "어딨더라"
-#define AppVersion    "0.1.0"
-#define AppPublisher  "markr.ai"
+#define AppDisplay    "어딨더라 (Eoditdeora)"
+#define AppVersion    "0.1.1"
+#define AppPublisher  "Eoditdeora Project"
 #define AppUrl        "https://github.com/Cheol-H-Jeong/eoditdeora"
+#define AppSupport    "https://github.com/Cheol-H-Jeong/eoditdeora/issues"
 #define AppExeName    "eoditdeora.exe"
+#define AppCopyright  "Copyright (C) 2026 Eoditdeora Contributors. AGPL-3.0-or-later."
 
 [Setup]
 AppId={#AppId}
 AppName={#AppDisplay}
 AppVersion={#AppVersion}
+VersionInfoVersion={#AppVersion}.0
+VersionInfoCompany={#AppPublisher}
+VersionInfoDescription=Eoditdeora local document knowledge base installer
+VersionInfoCopyright={#AppCopyright}
 AppPublisher={#AppPublisher}
 AppPublisherURL={#AppUrl}
+AppSupportURL={#AppSupport}
+AppUpdatesURL={#AppUrl}/releases
+AppContact=https://github.com/Cheol-H-Jeong
+AppComments=Local-only personal document knowledge base with semantic search and strict-provenance RAG. Source code AGPL-3.0.
 DefaultDirName={autopf}\Eoditdeora
 DefaultGroupName=Eoditdeora
 DisableProgramGroupPage=yes
@@ -29,6 +39,7 @@ Compression=lzma2/ultra
 SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayIcon={app}\{#AppExeName}
+UninstallDisplayName={#AppDisplay}
 SetupIconFile=icon.ico
 CloseApplications=yes
 RestartApplications=no

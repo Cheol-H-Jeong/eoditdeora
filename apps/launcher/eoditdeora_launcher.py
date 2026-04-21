@@ -102,10 +102,16 @@ def main() -> int:
     # HTTP bridge (same one the dev script uses).
     from importlib import import_module
 
-    dev = import_module("dev-server")
+    dev = import_module("dev_server")
     build_dir = ROOT / "apps" / "ui" / "build"
     if not build_dir.exists():
-        print(f"UI build missing at {build_dir}", file=sys.stderr)
+        msg = f"UI build missing at {build_dir}"
+        if sys.stderr is not None:
+            try:
+                print(msg, file=sys.stderr)
+            except Exception:  # noqa: BLE001
+                pass
+        log.error("ui_build_missing", path=str(build_dir))
         return 2
     # The Handler imports BUILD relative to the script file — when we
     # live inside PyInstaller onefile, sys._MEIPASS holds the right path.

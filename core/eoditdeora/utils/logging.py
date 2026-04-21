@@ -33,9 +33,16 @@ def configure_logging(level: str = "INFO") -> None:
             log_file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
         )
     ]
-    # stderr handler only when attached to a TTY or when env explicitly asks
-    if sys.stderr.isatty():
-        handlers.append(logging.StreamHandler(sys.stderr))
+    # stderr handler only when a real TTY is attached. PyInstaller's
+    # --windowed / --noconsole build on Windows produces sys.stderr = None,
+    # so we guard both the None case and the isatty() call.
+    if sys.stderr is not None:
+        try:
+            attached = sys.stderr.isatty()
+        except (AttributeError, ValueError, OSError):
+            attached = False
+        if attached:
+            handlers.append(logging.StreamHandler(sys.stderr))
 
     root = logging.getLogger()
     root.setLevel(log_level)

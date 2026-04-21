@@ -1,75 +1,231 @@
 name: release
 
-# When a v* tag is pushed:
-#   1. build.yml matrix (test + linux-installer + windows-installer) runs first
-#      because push-tag fires that workflow's own tag trigger.
-#   2. this workflow waits for those artifacts via workflow_run, then attaches
-#      the .AppImage and .exe installers to a GitHub Release so users can
-#      download a single file per OS directly from the repo page.
+# Fires on v* tag pushes (or manual workflow_dispatch for re-runs). Inlines
+# the full build matrix so that we do not depend on cross-workflow artifact
+# passing. A previous version used `workflow_run` with `branches-ignore:
+# ["**"]` which silently never fired.
+#
+# Addresses review feedback:
+#  * actions/checkout pins to the exact tag the release targets.
+#  * the installer build scripts receive the version derived from that tag,
+#    not a hardcoded string.
+#  * a unit-test job guards the packaging jobs and the publish step,
+#    mirroring the safety that the previous workflow_run setup had.
 on:
-  workflow_run:
-    workflows: ["build"]
-    types: [completed]
-    branches-ignore: ["**"]   # only fire when triggered by a tag push
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re-)attach artifacts to"
+        required: true
+        default: "v0.1.1"
 
 permissions:
   contents: write
-  actions: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  publish:
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      startsWith(github.event.workflow_run.head_branch, 'v')
+  resolve:
+    name: Resolve tag + version
+    runs-on: ubuntu-22.04
+    outputs:
+      tag:     ${{ steps.out.outputs.tag }}
+      ref:     ${{ steps.out.outputs.ref }}
+      version: ${{ steps.out.outputs.version }}
+      prerelease: ${{ steps.out.outputs.prerelease }}
+    steps:
+      - id: out
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          VER="${TAG#v}"
+          case "$TAG" in
+            *-rc*|*-beta*) PRE="true" ;;
+            *)             PRE="false" ;;
+          esac
+          {
+            echo "tag=$TAG"
+            echo "ref=refs/tags/$TAG"
+            echo "version=$VER"
+            echo "prerelease=$PRE"
+          } >> "$GITHUB_OUTPUT"
+
+  test:
+    name: Unit tests
+    needs: [resolve]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
-
-      - name: Download Linux installer
-        uses: actions/download-artifact@v4
+          ref: ${{ needs.resolve.outputs.ref }}
+      - uses: actions/setup-python@v5
         with:
-          name: eoditdeora-linux-appimage
-          path: dist/linux
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ github.event.workflow_run.id }}
-
-      - name: Download Windows installer
-        uses: actions/download-artifact@v4
-        with:
-          name: eoditdeora-windows-installer
-          path: dist/windows
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ github.event.workflow_run.id }}
-
-      - name: List payload
+          python-version: "3.11"
+          cache: pip
+      - name: System deps
         run: |
-          echo "Linux:"; ls -lh dist/linux
-          echo "Windows:"; ls -lh dist/windows
+          sudo apt-get update
+          sudo apt-get install -y build-essential libxml2-dev libxslt1-dev zlib1g-dev
+      - name: Install test deps
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          pip install \
+            pytest pytest-asyncio \
+            pydantic platformdirs tomli-w pathspec structlog xxhash watchdog \
+            httpx click rich \
+            lxml pypdfium2 pdfplumber python-docx openpyxl python-pptx \
+            olefile xlrd extract-msg py7zr rarfile Pillow pyhwp \
+            kiwipiepy lancedb pyarrow tantivy
+      - name: Run pytest
+        env:
+          PYTHONPATH: core
+        run: pytest core/tests -q
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+  linux:
+    name: Linux AppImage
+    needs: [resolve, test]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
         with:
-          tag_name: ${{ github.event.workflow_run.head_branch }}
-          name: ${{ github.event.workflow_run.head_branch }}
+          ref: ${{ needs.resolve.outputs.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: System deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential libxml2-dev libxslt1-dev zlib1g-dev \
+            binutils patchelf file desktop-file-utils libfuse2 \
+            libxkbcommon-x11-0 libegl1 libgl1 libxcb-cursor0 libxcb-icccm4 \
+            libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-shape0 libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 \
+            libxcb-xkb1 libxkbcommon0 libxkbcommon-x11-0 \
+            libnss3 libxcomposite1 libxdamage1 libxrandr2 libxi6 \
+            libasound2 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+            libgtk-3-0 libpango-1.0-0 libdrm2 libgbm1
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install deps
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip wheel setuptools
+          .venv/bin/pip install \
+            pyinstaller pywebview PyQt6 PyQt6-WebEngine \
+            pydantic platformdirs tomli-w pathspec structlog xxhash watchdog \
+            lxml pypdfium2 pdfplumber python-docx openpyxl python-pptx olefile xlrd \
+            extract-msg py7zr rarfile Pillow pyhwp \
+            kiwipiepy lancedb pyarrow tantivy httpx click rich
+      - name: Build AppImage
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          pnpm install
+          bash installers/linux/build-appimage.sh "$VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: installers/linux/out/Eoditdeora-*-x86_64.AppImage
+          if-no-files-found: error
+
+  windows:
+    name: Windows Installer
+    needs: [resolve, test]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install deps
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\pip install --upgrade pip wheel setuptools
+          .\.venv\Scripts\pip install `
+            pyinstaller pywebview PyQt6 PyQt6-WebEngine `
+            pydantic platformdirs tomli-w pathspec structlog xxhash watchdog `
+            lxml pypdfium2 pdfplumber python-docx openpyxl python-pptx olefile xlrd `
+            extract-msg py7zr rarfile Pillow pyhwp `
+            kiwipiepy lancedb pyarrow tantivy httpx click rich
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          Add-Content $env:GITHUB_PATH "C:\Program Files (x86)\Inno Setup 6"
+      - name: Icon
+        shell: pwsh
+        run: |
+          Copy-Item installers/linux/icon.svg installers/windows/icon.svg -Force
+          .\.venv\Scripts\python installers\windows\make-icon.py
+      - name: Build installer
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          pnpm install
+          .\installers\windows\build-installer.ps1 -Version "$env:VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: installers/windows/out/Eoditdeora-*-setup.exe
+          if-no-files-found: error
+
+  publish:
+    name: Publish Release
+    needs: [resolve, linux, windows]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.ref }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: List artifacts
+        run: ls -lhR artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve.outputs.tag }}
+          name: ${{ needs.resolve.outputs.tag }}
           draft: false
-          prerelease: ${{ contains(github.event.workflow_run.head_branch, '-rc') || contains(github.event.workflow_run.head_branch, '-beta') }}
+          prerelease: ${{ needs.resolve.outputs.prerelease == 'true' }}
           generate_release_notes: true
           body: |
-            어딨더라 — Local document knowledge base.
+            어딨더라 — 로컬 전용 문서 지식베이스.
 
-            ## Download
-            - **Windows 10/11 x64**: `Eoditdeora-*-setup.exe` — double-click to install.
-            - **Linux x64**:         `Eoditdeora-*-x86_64.AppImage` — `chmod +x` then double-click.
+            ## 다운로드
+            - **Windows 10/11 x64**: `Eoditdeora-*-setup.exe` — 더블클릭 설치.
+            - **Linux x64**: `Eoditdeora-*-x86_64.AppImage` — `chmod +x` 후 더블클릭.
 
-            After install, launch once. The app:
-              - registers auto-start on user login,
-              - watches `~/Documents` (or `~/문서`) out of the box,
-              - brings up the local LLM backends automatically when model
-                weights are present (see Settings → Local LLM Models).
-
-            Full install guide: [docs/INSTALL.md](docs/INSTALL.md).
+            ## Windows SmartScreen 경고 안내
+            이 설치파일은 개인 개발자 릴리즈이며 EV 코드 서명 인증서가 없습니다.
+            Windows Defender SmartScreen 이 "Windows에서 PC를 보호했습니다"
+            경고를 띄우면 **자세히** → **실행** 을 눌러 진행하세요. 내부 동작과
+            소스는 public repo (AGPL-3.0) 에서 모두 확인 가능합니다.
           files: |
-            dist/linux/*
-            dist/windows/*
+            artifacts/linux-appimage/*
+            artifacts/windows-installer/*
