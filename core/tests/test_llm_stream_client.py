@@ -111,6 +111,28 @@ def test_chat_stream_wraps_network_errors(monkeypatch: pytest.MonkeyPatch):
     assert ei.value.code == ERR_UPSTREAM_UNAVAILABLE
 
 
+def test_chat_stream_retries_transport_error_then_succeeds(monkeypatch: pytest.MonkeyPatch):
+    attempts = {"count": 0}
+    monkeypatch.setattr("eoditdeora.runtime.clients.time.sleep", lambda _sec: None)
+
+    def fake_stream(_method: str, _url: str, **_kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise httpx.ConnectError("connection refused")
+        return _MockStreamResponse(
+            [
+                'data: {"choices":[{"delta":{"content":"복구"}}]}',
+                "data: [DONE]",
+            ]
+        )
+
+    monkeypatch.setattr(httpx, "stream", fake_stream)
+    client = LlmClient("127.0.0.1", 0)
+
+    assert list(client.chat_stream("sys", "usr")) == ["복구"]
+    assert attempts["count"] == 2
+
+
 def test_chat_stream_surfaces_rate_limit(monkeypatch: pytest.MonkeyPatch):
     def fake_stream(_method: str, _url: str, **_kwargs):
         return _MockStreamResponse([], status_code=429)
@@ -121,3 +143,54 @@ def test_chat_stream_surfaces_rate_limit(monkeypatch: pytest.MonkeyPatch):
     with pytest.raises(RpcError) as ei:
         list(client.chat_stream("sys", "usr"))
     assert ei.value.code == ERR_UPSTREAM_RATE_LIMIT
+
+
+def test_chat_stream_retries_transient_http_5xx_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    attempts = {"count": 0}
+    monkeypatch.setattr("eoditdeora.runtime.clients.time.sleep", lambda _sec: None)
+
+    def fake_stream(_method: str, _url: str, **_kwargs):
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            return _MockStreamResponse([], status_code=502)
+        return _MockStreamResponse(
+            [
+                'data: {"choices":[{"delta":{"content":"정상화"}}]}',
+                "data: [DONE]",
+            ]
+        )
+
+    monkeypatch.setattr(httpx, "stream", fake_stream)
+    client = LlmClient("127.0.0.1", 0)
+
+    assert list(client.chat_stream("sys", "usr")) == ["정상화"]
+    assert attempts["count"] == 3
+
+
+def test_chat_stream_does_not_retry_after_partial_output(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    attempts = {"count": 0}
+    monkeypatch.setattr("eoditdeora.runtime.clients.time.sleep", lambda _sec: None)
+
+    class _BrokenMidStreamResponse(_MockStreamResponse):
+        def iter_lines(self) -> Iterator[str]:
+            yield 'data: {"choices":[{"delta":{"content":"첫 청크"}}]}'
+            raise httpx.ReadError("socket closed")
+
+    def fake_stream(_method: str, _url: str, **_kwargs):
+        attempts["count"] += 1
+        return _BrokenMidStreamResponse([])
+
+    monkeypatch.setattr(httpx, "stream", fake_stream)
+    client = LlmClient("127.0.0.1", 0)
+
+    chunks: list[str] = []
+    with pytest.raises(RpcError) as ei:
+        for chunk in client.chat_stream("sys", "usr"):
+            chunks.append(chunk)
+    assert chunks == ["첫 청크"]
+    assert ei.value.code == ERR_UPSTREAM_UNAVAILABLE
+    assert attempts["count"] == 1

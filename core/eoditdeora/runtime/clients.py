@@ -289,46 +289,85 @@ class LlmClient(_EndpointClient):
             body["response_format"] = response_format
 
         url = resolve_chat_url(self._endpoint)
-        try:
-            with httpx.stream(
-                "POST",
-                url,
-                json=body,
-                headers=_auth_headers(self._endpoint.api_key),
-                timeout=self._timeout,
-            ) as r:
-                _raise_upstream_for_status(r, url, "llm")
-                for line in r.iter_lines():
-                    if not line or not line.startswith("data:"):
-                        continue
-                    payload = line[5:].strip()
-                    if payload == "[DONE]":
-                        return
-                    try:
-                        data = json.loads(payload)
-                    except ValueError as e:
-                        raise RpcError(
-                            ERR_UPSTREAM_BAD_RESPONSE,
-                            "추론 서버가 올바른 SSE JSON 청크를 돌려주지 않았습니다",
-                            {"url": url, "role": "llm"},
-                        ) from e
-                    choices = data.get("choices") or []
-                    if not choices:
-                        continue
-                    delta = choices[0].get("delta") or {}
-                    content = _coerce_text_content(
-                        delta.get("content")
-                        or delta.get("reasoning_content")
-                        or delta.get("reasoning")
+        delay = _INITIAL_RETRY_DELAY_SEC
+        yielded_any = False
+        for attempt in range(1, _MAX_UPSTREAM_ATTEMPTS + 1):
+            try:
+                with httpx.stream(
+                    "POST",
+                    url,
+                    json=body,
+                    headers=_auth_headers(self._endpoint.api_key),
+                    timeout=self._timeout,
+                ) as r:
+                    if r.status_code >= 400:
+                        if (
+                            attempt < _MAX_UPSTREAM_ATTEMPTS
+                            and _is_retryable_status(r.status_code)
+                        ):
+                            log.warning(
+                                "upstream_stream_retry",
+                                role="llm",
+                                url=url,
+                                reason="http_status",
+                                status=r.status_code,
+                                attempt=attempt,
+                                max_attempts=_MAX_UPSTREAM_ATTEMPTS,
+                                delay_sec=delay,
+                            )
+                            time.sleep(delay)
+                            delay = min(delay * 2, _MAX_RETRY_DELAY_SEC)
+                            continue
+                        _raise_upstream_for_status(r, url, "llm")
+                    for line in r.iter_lines():
+                        if not line or not line.startswith("data:"):
+                            continue
+                        payload = line[5:].strip()
+                        if payload == "[DONE]":
+                            return
+                        try:
+                            data = json.loads(payload)
+                        except ValueError as e:
+                            raise RpcError(
+                                ERR_UPSTREAM_BAD_RESPONSE,
+                                "추론 서버가 올바른 SSE JSON 청크를 돌려주지 않았습니다",
+                                {"url": url, "role": "llm"},
+                            ) from e
+                        choices = data.get("choices") or []
+                        if not choices:
+                            continue
+                        delta = choices[0].get("delta") or {}
+                        content = _coerce_text_content(
+                            delta.get("content")
+                            or delta.get("reasoning_content")
+                            or delta.get("reasoning")
+                        )
+                        if content:
+                            yielded_any = True
+                            yield str(content)
+                    return
+            except httpx.HTTPError as e:
+                if not yielded_any and attempt < _MAX_UPSTREAM_ATTEMPTS:
+                    log.warning(
+                        "upstream_stream_retry",
+                        role="llm",
+                        url=url,
+                        reason="transport_error",
+                        detail=str(e),
+                        attempt=attempt,
+                        max_attempts=_MAX_UPSTREAM_ATTEMPTS,
+                        delay_sec=delay,
                     )
-                    if content:
-                        yield str(content)
-        except httpx.HTTPError as e:
-            raise RpcError(
-                ERR_UPSTREAM_UNAVAILABLE,
-                "추론 서버에 연결할 수 없습니다",
-                {"url": url, "role": "llm", "detail": str(e)},
-            ) from e
+                    time.sleep(delay)
+                    delay = min(delay * 2, _MAX_RETRY_DELAY_SEC)
+                    continue
+                raise RpcError(
+                    ERR_UPSTREAM_UNAVAILABLE,
+                    "추론 서버에 연결할 수 없습니다",
+                    {"url": url, "role": "llm", "detail": str(e)},
+                ) from e
+
+        raise AssertionError("unreachable")
 
 
 class EmbedClient(_EndpointClient):
