@@ -214,8 +214,13 @@ class MetaStore:
         new_path: str,
         *,
         new_root: str | None = None,
-    ) -> str | None:
-        """Move one document row to a new source path without changing doc_id."""
+    ) -> tuple[str, str | None] | None:
+        """Move one document row to a new source path without changing doc_id.
+
+        Returns the moved doc_id and, when the destination path already
+        belonged to another document, the displaced doc_id so callers can
+        purge derivative stores keyed outside SQLite.
+        """
         new_display = display_path(Path(new_path))
         with self.tx() as cur:
             cur.execute(
@@ -231,8 +236,10 @@ class MetaStore:
                 (new_path,),
             )
             existing = cur.fetchone()
+            displaced_doc_id: str | None = None
             if existing and str(existing["doc_id"]) != doc_id:
-                cur.execute("DELETE FROM documents WHERE doc_id = ?", (existing["doc_id"],))
+                displaced_doc_id = str(existing["doc_id"])
+                cur.execute("DELETE FROM documents WHERE doc_id = ?", (displaced_doc_id,))
             cur.execute(
                 """
                 UPDATE documents
@@ -243,7 +250,7 @@ class MetaStore:
                 """,
                 (new_path, new_display, new_root, doc_id),
             )
-            return doc_id
+            return doc_id, displaced_doc_id
 
     def get_document_by_path(self, path: str) -> dict[str, Any] | None:
         cur = self._conn.execute(

@@ -247,3 +247,39 @@ def test_duplicate_content_in_different_paths_keeps_both_documents(tmp_path: Pat
 
     doc_ids = {hit["doc_id"] for hit in fts.search("marker_dup_123", top_k=10)}
     assert doc_ids == {first_doc["doc_id"], second_doc["doc_id"]}
+
+
+def test_move_over_existing_path_purges_displaced_search_rows(tmp_path: Path, stores):
+    meta, fts, vec = stores
+    src = tmp_path / "source.txt"
+    dst = tmp_path / "existing.txt"
+    src_marker = "uniquesourcealpha123"
+    dst_marker = "uniquedestomega456"
+    src.write_text(f"이동 원본 {src_marker}", encoding="utf-8")
+    dst.write_text(f"덮어쓰기 대상 {dst_marker}", encoding="utf-8")
+
+    index_file(_make_cf(src), meta=meta, fts=fts, vectors=vec)
+    index_file(_make_cf(dst), meta=meta, fts=fts, vectors=vec)
+    assert fts.search(src_marker, top_k=5)
+    assert fts.search(dst_marker, top_k=5)
+
+    time.sleep(0.01)
+    src.rename(dst)
+    moved = CollectedFile(
+        path=dst.resolve(),
+        root=tmp_path.resolve(),
+        size=dst.stat().st_size,
+        mtime_ns=dst.stat().st_mtime_ns,
+        change=ChangeKind.MOVED,
+        previous_path=src.resolve(),
+    )
+
+    result = index_file(moved, meta=meta, fts=fts, vectors=vec)
+
+    assert result["status"] == "moved"
+    assert meta.count_documents() == 1
+    assert meta.get_document_by_path(str(src.resolve())) is None
+    current = meta.get_document_by_path(str(dst.resolve()))
+    assert current is not None
+    assert fts.search(src_marker, top_k=5)
+    assert not fts.search(dst_marker, top_k=5)

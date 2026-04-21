@@ -172,12 +172,17 @@ def index_file(
         return {"status": "deleted", "path": str(path)}
 
     if cf.change is ChangeKind.MOVED and cf.previous_path is not None:
-        moved_doc_id = meta.replace_path(
+        move_result = meta.replace_path(
             str(cf.previous_path),
             str(path),
             new_root=str(cf.root),
         )
-        if moved_doc_id and path.exists() and path.is_file():
+        if move_result is not None:
+            moved_doc_id, displaced_doc_id = move_result
+            if displaced_doc_id:
+                fts.delete_doc(displaced_doc_id)
+                vectors.delete_doc(displaced_doc_id)
+        if move_result is not None and path.exists() and path.is_file():
             current_doc_id = _doc_id_for(path, meta=meta, existing_doc_id=moved_doc_id)
             if current_doc_id == moved_doc_id:
                 existing = meta.get_document_by_path(str(path))
