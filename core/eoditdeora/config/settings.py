@@ -36,6 +36,12 @@ class ModelSettings(BaseModel):
     llama_cpp_embed_port: int = 17652
     llama_cpp_rerank_port: int = 17653
 
+    # Optional per-slot download URLs for the three GGUFs. Keys must
+    # match the keys in runtime.models._SLOTS (llm / embed / rerank).
+    # When empty, the UI's "모델 다운로드" button stays disabled and
+    # tells the user where to set the URL.
+    gguf_urls: dict[str, str] = Field(default_factory=dict)
+
 
 class IndexSettings(BaseModel):
     roots: list[str] = Field(default_factory=list)

@@ -66,6 +66,27 @@ def main() -> int:
 
     # ---- bring up local services ----------------------------------------
 
+    # First-run bootstrap: auto add-root(~/Documents), autostart registration.
+    # Idempotent; runs on every launch so re-installs and profile resets
+    # recover the same defaults.
+    import asyncio
+
+    from eoditdeora.api.methods import _first_run_bootstrap
+
+    try:
+        result = asyncio.run(_first_run_bootstrap({}))
+        log.info("first_run_bootstrap", actions=result["actions"])
+    except Exception as e:  # noqa: BLE001
+        log.warning("first_run_bootstrap_failed", error=str(e))
+
+    # Surface user-configured GGUF download URLs to the download slots.
+    try:
+        from eoditdeora.runtime.models import autoconfigure_defaults
+
+        autoconfigure_defaults()
+    except Exception as e:  # noqa: BLE001
+        log.debug("models_autoconfigure_skipped", error=str(e))
+
     # Indexer daemon — watches the registered roots.
     from eoditdeora.indexer.daemon import get_daemon
 
@@ -84,16 +105,6 @@ def main() -> int:
             log.warning("llm_ensure_failed", error=str(e))
 
     threading.Thread(target=_ensure_llm, name="eddr-llm-init", daemon=True).start()
-
-    # First-run: enable OS autostart so the user never has to remember.
-    try:
-        from eoditdeora.runtime.autostart import enable, status
-
-        if not status().get("enabled"):
-            enable()
-            log.info("autostart_registered")
-    except Exception as e:  # noqa: BLE001
-        log.warning("autostart_register_failed", error=str(e))
 
     # HTTP bridge (same one the dev script uses).
     from importlib import import_module

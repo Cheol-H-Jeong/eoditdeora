@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { listen } from "@tauri-apps/api/event";
+  import Settings from "$lib/Settings.svelte";
   import { openInOs, ping, search, type SearchResponse } from "$lib/rpc";
 
   let query = $state("");
@@ -9,6 +10,7 @@
   let response = $state<SearchResponse | null>(null);
   let errorMessage = $state<string | null>(null);
   let version = $state<string>("");
+  let showSidebar = $state(true);
   let inputEl: HTMLInputElement | undefined = $state();
 
   onMount(async () => {
@@ -18,10 +20,14 @@
     } catch (e) {
       errorMessage = `Sidecar not reachable: ${e}`;
     }
-    await listen("hotkey:activate", () => {
-      inputEl?.focus();
-      inputEl?.select();
-    });
+    try {
+      await listen("hotkey:activate", () => {
+        inputEl?.focus();
+        inputEl?.select();
+      });
+    } catch {
+      // Non-Tauri host (dev bridge) has no event bus.
+    }
   });
 
   async function submit() {
@@ -42,87 +48,118 @@
   }
 </script>
 
-<div class="spotlight">
-  <header>
-    <div class="brand">어딨더라</div>
-    <div class="version">v{version || "?"}</div>
-  </header>
+<div class="app">
+  <div class="main" class:no-sidebar={!showSidebar}>
+    <header>
+      <div class="brand">어딨더라</div>
+      <div class="toolbar">
+        <button
+          class="gear"
+          onclick={() => (showSidebar = !showSidebar)}
+          title={showSidebar ? "설정 닫기" : "설정 열기"}
+        >⚙</button>
+        <div class="version">v{version || "?"}</div>
+      </div>
+    </header>
 
-  <div class="bar">
-    <input
-      bind:this={inputEl}
-      bind:value={query}
-      onkeydown={onKeydown}
-      placeholder={askMode ? "무엇이 궁금한가요?" : "어떤 파일을 찾고 계신가요?"}
-      autocomplete="off"
-      autocorrect="off"
-      spellcheck="false"
-    />
-    <button class="mode" class:active={askMode} onclick={() => (askMode = !askMode)}>
-      {askMode ? "답변 모드" : "검색 모드"}
-    </button>
+    <div class="bar">
+      <input
+        bind:this={inputEl}
+        bind:value={query}
+        onkeydown={onKeydown}
+        placeholder={askMode ? "무엇이 궁금한가요?" : "어떤 파일을 찾고 계신가요?"}
+        autocomplete="off"
+        autocorrect="off"
+        spellcheck="false"
+      />
+      <button class="mode" class:active={askMode} onclick={() => (askMode = !askMode)}>
+        {askMode ? "답변 모드" : "검색 모드"}
+      </button>
+    </div>
+
+    {#if errorMessage}
+      <div class="error">{errorMessage}</div>
+    {/if}
+
+    {#if loading}
+      <div class="status">검색 중...</div>
+    {:else if response?.answer}
+      <section class="answer">
+        <header>답변</header>
+        <p>{response.answer.answer}</p>
+        {#if response.answer.citations.length}
+          <ol class="citations">
+            {#each response.answer.citations as c}
+              <li>
+                <button class="cite" onclick={() => openInOs(c.source_path_display)}>
+                  §{c.index} — {c.source_path_display}
+                </button>
+              </li>
+            {/each}
+          </ol>
+        {/if}
+      </section>
+    {/if}
+
+    {#if response?.results?.length}
+      <section class="results">
+        {#each response.results as hit, i}
+          <button class="card" onclick={() => openInOs(hit.source_path_display)}>
+            <div class="title">
+              {hit.title || hit.source_path_display.split(/[\\/]/).pop()}
+              {#if hit.classification}<span class="tag">{hit.classification}</span>{/if}
+            </div>
+            <div class="snippet">{hit.snippet}</div>
+            <div class="path">{hit.source_path_display}</div>
+            <div class="score">#{i + 1} · score {hit.score.toFixed(3)}</div>
+          </button>
+        {/each}
+      </section>
+    {:else if response && !loading}
+      <div class="status">결과 없음.</div>
+    {/if}
   </div>
 
-  {#if errorMessage}
-    <div class="error">{errorMessage}</div>
-  {/if}
-
-  {#if loading}
-    <div class="status">검색 중...</div>
-  {:else if response?.answer}
-    <section class="answer">
-      <header>답변</header>
-      <p>{response.answer.answer}</p>
-      {#if response.answer.citations.length}
-        <ol class="citations">
-          {#each response.answer.citations as c}
-            <li>
-              <button class="cite" onclick={() => openInOs(c.source_path_display)}>
-                §{c.index} — {c.source_path_display}
-              </button>
-            </li>
-          {/each}
-        </ol>
-      {/if}
-    </section>
-  {/if}
-
-  {#if response?.results?.length}
-    <section class="results">
-      {#each response.results as hit, i}
-        <button class="card" onclick={() => openInOs(hit.source_path_display)}>
-          <div class="title">
-            {hit.title || hit.source_path_display.split(/[\\/]/).pop()}
-            {#if hit.classification}<span class="tag">{hit.classification}</span>{/if}
-          </div>
-          <div class="snippet">{hit.snippet}</div>
-          <div class="path">{hit.source_path_display}</div>
-          <div class="score">#{i + 1} · score {hit.score.toFixed(3)}</div>
-        </button>
-      {/each}
-    </section>
-  {:else if response && !loading}
-    <div class="status">결과 없음.</div>
+  {#if showSidebar}
+    <Settings />
   {/if}
 </div>
 
 <style>
-  .spotlight {
-    max-width: 860px;
-    width: 100%;
+  .app {
+    display: flex;
+    min-height: 100vh;
+  }
+  .main {
+    flex: 1;
+    padding: 24px 28px 36px;
+    max-width: 760px;
     margin: 0 auto;
-    padding: 32px 24px 48px;
   }
   header {
     display: flex;
     justify-content: space-between;
-    align-items: baseline;
+    align-items: center;
     margin-bottom: 18px;
   }
   .brand {
     font-size: 20px;
     font-weight: 700;
     letter-spacing: -0.5px;
+  }
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .gear {
+    background: transparent;
+    border: 1px solid #2a2f3a;
+    color: #a0a6b0;
+    border-radius: 6px;
+    padding: 4px 8px;
+    cursor: pointer;
+    font-size: 14px;
   }
   .version {
     font-size: 11px;

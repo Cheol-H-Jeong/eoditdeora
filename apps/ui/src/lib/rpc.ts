@@ -54,14 +54,73 @@ export async function search(
   });
 }
 
-export async function addRoot(path: string): Promise<unknown> {
+export async function addRoot(path: string): Promise<{ ok: boolean; path?: string; error?: string }> {
   return rpc("index.add_root", { path });
 }
 
-export async function indexStatus(): Promise<unknown> {
-  return rpc("index.status");
+export async function removeRoot(path: string): Promise<{ ok: boolean; removed: number }> {
+  return rpc("index.remove_root", { path });
+}
+
+export type IndexStatus = {
+  roots: string[];
+  index: { doc_count: number; db_path: string };
+};
+
+export async function indexStatus(): Promise<IndexStatus> {
+  return rpc<IndexStatus>("index.status");
 }
 
 export async function ping(): Promise<{ ok: boolean; version: string }> {
   return rpc("ping");
+}
+
+export type AutostartStatus = {
+  platform: string;
+  enabled: boolean;
+  path?: string;
+  value?: string;
+};
+
+export async function autostartStatus(): Promise<AutostartStatus> {
+  return rpc<AutostartStatus>("autostart.status");
+}
+
+export async function autostartEnable(): Promise<unknown> {
+  return rpc("autostart.enable");
+}
+
+export async function autostartDisable(): Promise<unknown> {
+  return rpc("autostart.disable");
+}
+
+export type ModelSlot = {
+  key: "llm" | "embed" | "rerank";
+  display: string;
+  target_path: string;
+  present: boolean;
+  running: boolean;
+  downloaded_bytes: number;
+  total_bytes: number;
+  percent: number;
+  error: string | null;
+  cancelled: boolean;
+  finished: boolean;
+  source_configured: boolean;
+};
+
+export async function modelsStatus(): Promise<{ slots: ModelSlot[] }> {
+  return rpc<{ slots: ModelSlot[] }>("models.status");
+}
+
+export async function modelsDownload(key: string): Promise<ModelSlot> {
+  return rpc<ModelSlot>("models.download", { key });
+}
+
+export async function modelsCancel(key: string): Promise<ModelSlot> {
+  return rpc<ModelSlot>("models.cancel", { key });
+}
+
+export async function llmEnsure(): Promise<unknown> {
+  return rpc("llm.ensure");
 }

@@ -147,6 +147,69 @@ async def _llm_ensure(_: dict[str, Any]) -> dict[str, Any]:
     return {"backends": RuntimeSupervisor().ensure_running()}
 
 
+async def _models_status(_: dict[str, Any]) -> dict[str, Any]:
+    from eoditdeora.runtime import models
+
+    return {"slots": models.all_status()}
+
+
+async def _models_download(params: dict[str, Any]) -> dict[str, Any]:
+    from eoditdeora.api.rpc_server import ERR_INVALID_PARAMS, RpcError
+    from eoditdeora.runtime import models
+
+    key = str(params.get("key") or "")
+    if not key:
+        raise RpcError(ERR_INVALID_PARAMS, "missing 'key'")
+    try:
+        return models.start_download(key)
+    except ValueError as e:
+        raise RpcError(ERR_INVALID_PARAMS, str(e)) from e
+
+
+async def _models_cancel(params: dict[str, Any]) -> dict[str, Any]:
+    from eoditdeora.api.rpc_server import ERR_INVALID_PARAMS, RpcError
+    from eoditdeora.runtime import models
+
+    key = str(params.get("key") or "")
+    if not key:
+        raise RpcError(ERR_INVALID_PARAMS, "missing 'key'")
+    try:
+        return models.cancel_download(key)
+    except ValueError as e:
+        raise RpcError(ERR_INVALID_PARAMS, str(e)) from e
+
+
+async def _first_run_bootstrap(_: dict[str, Any]) -> dict[str, Any]:
+    """Idempotent first-launch bootstrap.
+
+    Safe to call on every launch: if a default root already exists we
+    don't re-add it, if autostart is already on we skip.
+    """
+    from pathlib import Path
+
+    from eoditdeora.collector.service import add_root
+    from eoditdeora.config import load_settings
+    from eoditdeora.runtime.autostart import enable as enable_autostart
+    from eoditdeora.runtime.autostart import status as autostart_status
+
+    actions: list[str] = []
+    settings = load_settings()
+
+    if not settings.index.roots:
+        for candidate in (Path.home() / "Documents", Path.home() / "문서"):
+            if candidate.is_dir():
+                result = await add_root(str(candidate))
+                if result.get("ok"):
+                    actions.append(f"added_root:{candidate}")
+                break
+
+    if not autostart_status().get("enabled"):
+        enable_autostart()
+        actions.append("autostart_enabled")
+
+    return {"actions": actions, "roots": load_settings().index.roots}
+
+
 def register_all(server: RpcServer) -> None:
     server.register("ping", _ping)
     server.register("settings.get", _get_settings)
@@ -160,5 +223,9 @@ def register_all(server: RpcServer) -> None:
     server.register("autostart.disable", _autostart_disable)
     server.register("autostart.status", _autostart_status)
     server.register("llm.ensure", _llm_ensure)
+    server.register("models.status", _models_status)
+    server.register("models.download", _models_download)
+    server.register("models.cancel", _models_cancel)
+    server.register("first_run.bootstrap", _first_run_bootstrap)
     server.register("forget", _forget)
     server.register("open_file", _open_file)
