@@ -63,14 +63,21 @@ async def remove_root(path: str) -> dict[str, Any]:
     if removed:
         _refresh_indexer_daemon()
     removed_fast_rows = 0
+    removed_content_docs = 0
     if removed:
         fast = FastIndex()
         try:
             removed_fast_rows = fast.delete_under(abs_path)
         finally:
             fast.close()
+        removed_content_docs = _purge_root_content(abs_path)
     log.info("root_removed", path=str(abs_path), removed=removed)
-    return {"ok": True, "removed": removed, "fast_index_removed": removed_fast_rows}
+    return {
+        "ok": True,
+        "removed": removed,
+        "fast_index_removed": removed_fast_rows,
+        "content_docs_removed": removed_content_docs,
+    }
 
 
 def _refresh_indexer_daemon() -> None:
@@ -82,6 +89,31 @@ def _refresh_indexer_daemon() -> None:
         get_daemon().refresh_roots()
     except Exception as e:  # noqa: BLE001
         log.warning("daemon_refresh_failed", error=str(e))
+
+
+def _purge_root_content(abs_path: Path) -> int:
+    """Drop parsed/indexed content for a root that is no longer watched."""
+    from eoditdeora.storage.fts import FtsStore
+    from eoditdeora.storage.meta import MetaStore
+    from eoditdeora.storage.vectors import VectorStore
+
+    meta = MetaStore()
+    try:
+        rows = meta.list_documents_under_root(str(abs_path))
+        if not rows:
+            return 0
+        fts = FtsStore()
+        vectors = VectorStore()
+        removed = 0
+        for row in rows:
+            doc_id = str(row["doc_id"])
+            meta.delete_document(doc_id)
+            fts.delete_doc(doc_id)
+            vectors.delete_doc(doc_id)
+            removed += 1
+        return removed
+    finally:
+        meta.close()
 
 
 async def status() -> dict[str, Any]:
