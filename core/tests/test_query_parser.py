@@ -22,6 +22,16 @@ def test_parse_query_preserves_negative_phrase_as_phrase() -> None:
     )
 
 
+def test_parse_query_allows_whitespace_after_negative_marker() -> None:
+    parsed = parse_query('예산 - "품의서 초안" - 취소')
+    assert parsed == ParsedQuery(
+        positive_terms=["예산"],
+        phrases=[],
+        negative_terms=["취소"],
+        negative_phrases=["품의서 초안"],
+    )
+
+
 def test_query_tokenizer_drops_stopwords_only_for_query():
     assert kiwi_tokenize_for_query("예산을 의 품의") == ["예산", "품"]
 

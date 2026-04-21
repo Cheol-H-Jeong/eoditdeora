@@ -29,9 +29,14 @@ def parse_query(raw: str) -> ParsedQuery:
         if i >= n:
             break
 
-        is_negative = raw[i] == "-" and i + 1 < n and not raw[i + 1].isspace()
-        if is_negative:
-            i += 1
+        is_negative = False
+        if raw[i] == "-":
+            j = i + 1
+            while j < n and raw[j].isspace():
+                j += 1
+            if j < n:
+                is_negative = True
+                i = j
 
         if i < n and raw[i] == '"':
             i += 1
