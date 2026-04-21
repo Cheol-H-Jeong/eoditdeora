@@ -32,6 +32,7 @@ for _m in (
     "txt_parser",
     "md_parser",
     "rtf_parser",
+    "odf_parser",
     "docx_parser",
     "xlsx_parser",
     "pptx_parser",

@@ -14,6 +14,7 @@ import pytest
 from eoditdeora.parsers.docx_parser import DocxParser
 from eoditdeora.parsers.hwpx_parser import HwpxParser
 from eoditdeora.parsers.md_parser import MdParser
+from eoditdeora.parsers.odf_parser import OpenDocumentParser
 from eoditdeora.parsers.pdf_parser import PdfTextLayerParser
 from eoditdeora.parsers.rtf_parser import RtfParser
 from eoditdeora.parsers.txt_parser import TxtParser
@@ -100,6 +101,13 @@ def test_invalid_rtf_rejected(tmp_path: Path) -> None:
     p = tmp_path / "broken.rtf"
     p.write_text("plain text only", encoding="utf-8")
     doc = _parse(RtfParser(), p)
+    assert doc.parse_status == "invalid_format"
+
+
+def test_non_zip_odt_invalid_format(tmp_path: Path) -> None:
+    p = tmp_path / "broken.odt"
+    p.write_bytes(b"not a zip")
+    doc = _parse(OpenDocumentParser(), p)
     assert doc.parse_status == "invalid_format"
 
 
