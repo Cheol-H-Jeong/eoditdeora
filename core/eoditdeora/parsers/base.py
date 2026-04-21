@@ -55,7 +55,14 @@ class ParsedDoc(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
     parse_status: Literal[
-        "ok", "empty", "encrypted", "invalid_format", "file_missing", "parser_error", "parser_timeout"
+        "ok",
+        "empty",
+        "encrypted",
+        "invalid_format",
+        "file_missing",
+        "parser_error",
+        "parser_timeout",
+        "too_large",
     ] = "ok"
     parse_ms: int | None = None
 

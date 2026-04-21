@@ -33,6 +33,11 @@ def _duplicate_doc_id_for(content_doc_id: str, path: Path) -> str:
     return f"{content_doc_id}#{path_digest}"
 
 
+def _skipped_doc_id_for(reason: str, path: Path) -> str:
+    path_digest = hashlib.sha256(str(path.resolve()).encode("utf-8")).hexdigest()
+    return f"skip:{reason}:{path_digest}"
+
+
 def _doc_id_for(
     path: Path,
     *,
@@ -60,6 +65,8 @@ def _upsert_parsed_doc(
     doc: ParsedDoc,
     path: Path,
     indexed_at: int,
+    size_bytes: int | None = None,
+    mtime_ns: int | None = None,
 ) -> None:
     meta.upsert_document(
         {
@@ -70,8 +77,8 @@ def _upsert_parsed_doc(
             "format": doc.format,
             "parser": doc.parser,
             "fidelity": doc.fidelity,
-            "size_bytes": cf.size,
-            "mtime_ns": cf.mtime_ns,
+            "size_bytes": cf.size if size_bytes is None else size_bytes,
+            "mtime_ns": cf.mtime_ns if mtime_ns is None else mtime_ns,
             "indexed_at": indexed_at,
             "classification": None,
             "summary_oneline": None,
@@ -205,8 +212,54 @@ def index_file(
         return {"status": "skipped", "reason": "file_missing", "path": str(path)}
 
     existing = meta.get_document_by_path(str(path))
+    settings = load_settings()
 
-    if path.stat().st_size == 0:
+    try:
+        current_stat = path.stat()
+    except OSError as e:
+        log.warning("index_stat_failed", path=str(path), error=str(e))
+        return {"status": "skipped", "reason": "file_missing", "path": str(path)}
+
+    current_size = current_stat.st_size
+    max_file_bytes = max(1, int(settings.index.max_file_bytes))
+
+    if current_size > max_file_bytes:
+        too_large_doc_id = existing["doc_id"] if existing else _skipped_doc_id_for("too_large", path)
+        doc = ParsedDoc(
+            doc_id=too_large_doc_id,
+            source_path=str(path),
+            source_path_display=display_path(path),
+            format=(path.suffix.lower().lstrip(".") or "unknown"),
+            parser="preflight",
+            fidelity=1,
+            parse_status="too_large",
+            warnings=[f"file_too_large: {current_size}_bytes > {max_file_bytes}_bytes"],
+        )
+        now_ns = time.time_ns()
+        _upsert_parsed_doc(
+            cf=cf,
+            meta=meta,
+            doc=doc,
+            path=path,
+            indexed_at=now_ns,
+            size_bytes=current_size,
+            mtime_ns=current_stat.st_mtime_ns,
+        )
+        _clear_indexed_payload(
+            doc_id=doc.doc_id,
+            meta=meta,
+            fts=fts,
+            vectors=vectors,
+        )
+        log.warning(
+            "parser_file_too_large",
+            path=str(path),
+            size_bytes=current_size,
+            max_file_bytes=max_file_bytes,
+        )
+        return {"status": "skipped", "reason": "too_large", "path": str(path)}
+
+    if current_size == 0:
         empty_doc_id = _doc_id_for(
             path,
             meta=meta,
@@ -239,7 +292,7 @@ def index_file(
         meta=meta,
         existing_doc_id=existing["doc_id"] if existing else None,
     )
-    if existing and existing["doc_id"] == doc_id and existing["mtime_ns"] == cf.mtime_ns:
+    if existing and existing["doc_id"] == doc_id and existing["mtime_ns"] == current_stat.st_mtime_ns:
         return {"status": "unchanged", "path": str(path)}
     # If the same source_path had a previous doc_id (content changed), drop
     # the old rows from every store so the new content fully replaces it.
@@ -251,7 +304,7 @@ def index_file(
             vectors=vectors,
         )
 
-    timeout_sec = max(1, int(load_settings().index.parser_timeout_sec))
+    timeout_sec = max(1, int(settings.index.parser_timeout_sec))
 
     try:
         result = _parse_with_timeout(path, doc_id=doc_id, timeout_sec=timeout_sec)

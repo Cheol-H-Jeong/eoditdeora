@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from eoditdeora.collector.model import ChangeKind, CollectedFile
+from eoditdeora.config import load_settings, save_settings
 from eoditdeora.indexer import pipeline
 from eoditdeora.indexer.pipeline import index_file
 from eoditdeora.storage.fts import FtsStore
@@ -106,6 +107,62 @@ def test_content_change_to_empty_replaces_document_without_crashing(tmp_path: Pa
     assert current is not None
     assert current["size_bytes"] == 0
     assert not fts.search("empty_marker_123", top_k=5)
+
+
+def test_file_growing_past_max_size_is_skipped_before_parse(
+    tmp_path: Path,
+    stores,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    meta, fts, vec = stores
+    settings = load_settings()
+    settings.index.max_file_bytes = 16
+    save_settings(settings)
+
+    src = tmp_path / "note.txt"
+    src.write_text("tiny", encoding="utf-8")
+    queued_cf = _make_cf(src)
+    src.write_text("x" * 128, encoding="utf-8")
+
+    def _unexpected_parse(*args, **kwargs):
+        raise AssertionError("oversized files must be rejected before parse")
+
+    monkeypatch.setattr(pipeline, "_parse_with_timeout", _unexpected_parse)
+
+    result = index_file(queued_cf, meta=meta, fts=fts, vectors=vec)
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "too_large"
+    current = meta.get_document_by_path(str(src.resolve()))
+    assert current is not None
+    assert current["parser"] == "preflight"
+    assert current["size_bytes"] == 128
+
+
+def test_oversized_reindex_clears_stale_search_rows(tmp_path: Path, stores):
+    meta, fts, vec = stores
+    settings = load_settings()
+    settings.index.max_file_bytes = 16
+    save_settings(settings)
+
+    src = tmp_path / "note.txt"
+    marker = "small_marker_123"
+    src.write_text(marker, encoding="utf-8")
+    index_file(_make_cf(src), meta=meta, fts=fts, vectors=vec)
+    assert fts.search(marker, top_k=5)
+
+    time.sleep(0.01)
+    src.write_text("x" * 128, encoding="utf-8")
+    result = index_file(_make_cf(src), meta=meta, fts=fts, vectors=vec)
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "too_large"
+    assert not fts.search(marker, top_k=5)
+    current = meta.get_document_by_path(str(src.resolve()))
+    assert current is not None
+    assert current["parser"] == "preflight"
+    assert current["size_bytes"] == 128
+    assert meta.get_chunks_for_doc(current["doc_id"]) == []
 
 
 def test_reparse_failure_clears_stale_search_rows_for_same_doc_id(
