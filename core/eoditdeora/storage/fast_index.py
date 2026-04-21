@@ -261,6 +261,7 @@ class FastIndex:
         q = (query or "").strip()
         if not q:
             return []
+        safe_limit = max(0, int(limit))
 
         use_like = len(q) < 3
         params: list[Any] = []
@@ -276,7 +277,7 @@ class FastIndex:
                 sql += f" AND ext IN ({placeholders})"
                 params.extend(e.lower() for e in exts)
             sql += " ORDER BY mtime DESC LIMIT ?"
-            params.append(int(limit))
+            params.append(safe_limit)
         else:
             # `"q"` is the phrase-quoted form; without quoting the
             # tokenizer would treat hyphens / dots as punctuation
@@ -294,7 +295,7 @@ class FastIndex:
                 sql += f" AND f.ext IN ({placeholders})"
                 params.extend(e.lower() for e in exts)
             sql += " ORDER BY bm25(files_fts), f.mtime DESC LIMIT ?"
-            params.append(int(limit))
+            params.append(safe_limit)
 
         with self._lock:
             rows = self._conn.execute(sql, params).fetchall()

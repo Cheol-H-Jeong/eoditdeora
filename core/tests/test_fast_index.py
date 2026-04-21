@@ -111,3 +111,8 @@ def test_limit_is_respected(idx: FastIndex):
     idx.upsert_many([(f"/x/file{i:03d}.txt", 1, 100.0) for i in range(20)])
     rows = idx.search("file", limit=5)
     assert len(rows) == 5
+
+
+def test_negative_limit_does_not_disable_cap(idx: FastIndex):
+    idx.upsert_many([(f"/x/file{i:03d}.txt", 1, 100.0 + i) for i in range(5)])
+    assert idx.search("file", limit=-1) == []

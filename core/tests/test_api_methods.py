@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from eoditdeora.api.rpc_server import RpcServer
+from eoditdeora.storage.fast_index import FastIndex
 
 
 async def _call(server: RpcServer, method: str, params: dict[str, Any] | None = None):
@@ -65,6 +66,20 @@ async def test_search_returns_empty_for_blank_query():
     server = RpcServer()
     resp = await _call(server, "search", {"query": "   "})
     assert resp["result"] == {"results": [], "query": ""}
+
+
+@pytest.mark.asyncio
+async def test_files_search_negative_limit_returns_no_rows():
+    idx = FastIndex()
+    try:
+        idx.upsert_many([(f"/x/file{i:03d}.txt", 1, 100.0 + i) for i in range(3)])
+    finally:
+        idx.close()
+
+    server = RpcServer()
+    resp = await _call(server, "files.search", {"query": "file", "limit": -1})
+    assert resp["result"]["results"] == []
+    assert resp["result"]["total_indexed"] == 3
 
 
 @pytest.mark.asyncio
