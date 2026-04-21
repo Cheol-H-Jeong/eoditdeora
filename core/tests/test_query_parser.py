@@ -64,3 +64,23 @@ def test_build_tantivy_query_includes_negative_phrases() -> None:
         negative_phrases=["품의서 초안"],
     )
     assert build_tantivy_query(parsed) == 'tokens:예산 -phrase_text:"품의서 초안"'
+
+
+def test_build_tantivy_query_anchors_negative_only_term_query() -> None:
+    parsed = ParsedQuery(
+        positive_terms=[],
+        phrases=[],
+        negative_terms=["취소"],
+        negative_phrases=[],
+    )
+    assert build_tantivy_query(parsed) == "* -tokens:취소"
+
+
+def test_build_tantivy_query_anchors_negative_only_phrase_query() -> None:
+    parsed = ParsedQuery(
+        positive_terms=[],
+        phrases=[],
+        negative_terms=[],
+        negative_phrases=["품의서 초안"],
+    )
+    assert build_tantivy_query(parsed) == '* -phrase_text:"품의서 초안"'

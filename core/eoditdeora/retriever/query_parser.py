@@ -117,6 +117,12 @@ def parse_query(raw: str) -> ParsedQuery:
 
 def build_tantivy_query(parsed: ParsedQuery) -> str:
     parts: list[str] = []
+    if not parsed.positive_terms and not parsed.phrases and (
+        parsed.negative_terms or parsed.negative_phrases
+    ):
+        # Tantivy rejects pure negative queries unless they are anchored to
+        # a positive matcher. `* -tokens:취소` means "all docs except 취소".
+        parts.append("*")
     parts.extend(f'tokens:{_escape_term(term)}' for term in parsed.positive_terms)
     parts.extend(f'phrase_text:"{_escape_phrase(phrase)}"' for phrase in parsed.phrases)
     parts.extend(f'-tokens:{_escape_term(term)}' for term in parsed.negative_terms)

@@ -77,6 +77,36 @@ def test_negative_phrase_with_whitespace_still_excludes_exact_phrase(tmp_path: P
     assert {r["chunk_id"] for r in results} == {"c2", "c3"}
 
 
+def test_negative_only_term_query_excludes_matching_documents(tmp_path: Path):
+    store = FtsStore(index_dir=tmp_path / "tantivy")
+    store.upsert(
+        [
+            {"chunk_id": "c1", "doc_id": "d1", "text": "예산 취소"},
+            {"chunk_id": "c2", "doc_id": "d2", "text": "예산 승인"},
+            {"chunk_id": "c3", "doc_id": "d3", "text": "회의 승인"},
+        ]
+    )
+
+    results = store.search("-취소", top_k=5)
+
+    assert {r["chunk_id"] for r in results} == {"c2", "c3"}
+
+
+def test_negative_only_phrase_query_excludes_exact_phrase(tmp_path: Path):
+    store = FtsStore(index_dir=tmp_path / "tantivy")
+    store.upsert(
+        [
+            {"chunk_id": "c1", "doc_id": "d1", "text": "예산 품의서 초안 검토"},
+            {"chunk_id": "c2", "doc_id": "d2", "text": "예산 초안 품의서 검토"},
+            {"chunk_id": "c3", "doc_id": "d3", "text": "예산 승인 완료"},
+        ]
+    )
+
+    results = store.search('-"품의서 초안"', top_k=5)
+
+    assert {r["chunk_id"] for r in results} == {"c2", "c3"}
+
+
 def test_query_expansion_matches_common_office_synonyms(tmp_path: Path):
     store = FtsStore(index_dir=tmp_path / "tantivy")
     store.upsert(

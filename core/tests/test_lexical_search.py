@@ -159,3 +159,32 @@ async def test_search_mode_surfaces_real_fts_search_failures(
 def test_lexical_search_empty_query_short_circuits() -> None:
     assert lexical_mod.lexical_search("") == []
     assert lexical_mod.lexical_search("   ") == []
+
+
+@pytest.mark.asyncio
+async def test_search_mode_negative_only_query_returns_hits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def lexical_stub(query: str, *, top_k: int = 20) -> list[dict[str, Any]]:
+        assert query == "-취소"
+        return [
+            {
+                "chunk_id": "c2",
+                "doc_id": "d2",
+                "snippet": "예산 승인",
+                "score": 4.2,
+                "fusion_score": None,
+                "source_path": "/tmp/ok.txt",
+                "source_path_display": "/tmp/ok.txt",
+                "format": "txt",
+                "title": "승인 문서",
+                "classification": None,
+            }
+        ]
+
+    monkeypatch.setattr(service_mod, "lexical_search", lexical_stub)
+
+    out = await service_mod.search("-취소", mode="search")
+
+    assert out["results"][0]["chunk_id"] == "c2"
+    assert "warning" not in out
