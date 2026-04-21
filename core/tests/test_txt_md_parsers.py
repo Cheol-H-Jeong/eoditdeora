@@ -174,6 +174,34 @@ def test_odt_parser_does_not_duplicate_table_cells_as_paragraphs(tmp_path: Path)
     ]
 
 
+def test_odt_parser_preserves_repeated_paragraphs(tmp_path: Path):
+    f = tmp_path / "repeated.odt"
+    _write_odf_zip(
+        f,
+        content_xml=(
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<office:document-content '
+            'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+            'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">'
+            "<office:body><office:text>"
+            "<text:p>승인 대기</text:p>"
+            "<text:p>승인 대기</text:p>"
+            "<text:p>다음 단계</text:p>"
+            "</office:text></office:body>"
+            "</office:document-content>"
+        ),
+    )
+
+    res = OpenDocumentParser().parse(f, doc_id="sha256:" + "6" * 64)
+
+    assert res.doc.parse_status == "ok"
+    assert [(b.type, b.text) for b in res.doc.blocks] == [
+        ("paragraph", "승인 대기"),
+        ("paragraph", "승인 대기"),
+        ("paragraph", "다음 단계"),
+    ]
+
+
 def test_ods_parser_extracts_sheet_rows(tmp_path: Path):
     f = tmp_path / "budget.ods"
     _write_odf_zip(

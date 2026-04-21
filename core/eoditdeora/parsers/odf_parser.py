@@ -153,7 +153,7 @@ class OpenDocumentParser:
 def _parse_text_blocks(root: ET.Element) -> list[Block]:
     blocks: list[Block] = []
     _walk_text_blocks(root, blocks, in_list_item=False)
-    return _dedupe_blocks(blocks)
+    return blocks
 
 
 def _walk_text_blocks(elem: ET.Element, blocks: list[Block], *, in_list_item: bool) -> None:
@@ -342,18 +342,6 @@ def _safe_int(raw: str | None, *, fallback: int) -> int:
         return int(raw)
     except ValueError:
         return fallback
-
-
-def _dedupe_blocks(blocks: list[Block]) -> list[Block]:
-    deduped: list[Block] = []
-    seen: set[tuple[str, str, int | None]] = set()
-    for block in blocks:
-        key = (block.type, block.text, block.level)
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(block)
-    return deduped
 
 
 register(OpenDocumentParser())
