@@ -36,16 +36,25 @@ _DISK_USAGE_BUCKETS = (
 )
 
 
-def _parse_int_param(params: dict[str, Any], key: str, default: int) -> int:
+def _parse_int_param(
+    params: dict[str, Any],
+    key: str,
+    default: int,
+    *,
+    minimum: int | None = None,
+) -> int:
     from eoditdeora.api.rpc_server import ERR_INVALID_PARAMS, RpcError
 
     raw = params.get(key, default)
     if isinstance(raw, bool):
         raise RpcError(ERR_INVALID_PARAMS, f"{key} must be integer")
     try:
-        return int(raw)
+        value = int(raw)
     except (TypeError, ValueError) as e:
         raise RpcError(ERR_INVALID_PARAMS, f"{key} must be integer") from e
+    if minimum is not None and value < minimum:
+        raise RpcError(ERR_INVALID_PARAMS, f"{key} must be >= {minimum}")
+    return value
 
 
 def _normalize_extensions_param(raw: Any) -> list[str] | None:
@@ -434,20 +443,33 @@ async def _history_record_open(params: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _history_top(params: dict[str, Any]) -> dict[str, Any]:
+    from eoditdeora.api.rpc_server import ERR_INVALID_PARAMS, RpcError
     from eoditdeora.storage.history import HistoryStore
 
     kinds_raw = params.get("kinds")
     kinds = {"queries", "opens"}
     if isinstance(kinds_raw, list) and kinds_raw:
         kinds = {str(kind) for kind in kinds_raw}
+        invalid_kinds = sorted(kind for kind in kinds if kind not in {"queries", "opens"})
+        if invalid_kinds:
+            raise RpcError(
+                ERR_INVALID_PARAMS,
+                f"kinds contains unsupported value: {invalid_kinds[0]}",
+            )
+    elif kinds_raw is not None and not isinstance(kinds_raw, list):
+        raise RpcError(ERR_INVALID_PARAMS, "kinds must be list")
 
     history = HistoryStore()
     try:
         result: dict[str, Any] = {}
         if "queries" in kinds:
-            result["queries"] = history.top_queries(int(params.get("limit_query", 5)))
+            result["queries"] = history.top_queries(
+                _parse_int_param(params, "limit_query", 5, minimum=0)
+            )
         if "opens" in kinds:
-            result["opens"] = history.top_opens(int(params.get("limit_open", 10)))
+            result["opens"] = history.top_opens(
+                _parse_int_param(params, "limit_open", 10, minimum=0)
+            )
         return result
     finally:
         history.close()

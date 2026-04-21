@@ -228,6 +228,46 @@ async def test_history_clear_rpc():
 
 
 @pytest.mark.asyncio
+async def test_history_top_rejects_non_integer_limits():
+    server = RpcServer()
+
+    resp = await _call(server, "history.top", {"limit_query": "five"})
+
+    assert resp["error"]["code"] == ERR_INVALID_PARAMS
+    assert resp["error"]["message"] == "limit_query must be integer"
+
+
+@pytest.mark.asyncio
+async def test_history_top_rejects_negative_limits():
+    server = RpcServer()
+
+    resp = await _call(server, "history.top", {"limit_open": -1})
+
+    assert resp["error"]["code"] == ERR_INVALID_PARAMS
+    assert resp["error"]["message"] == "limit_open must be >= 0"
+
+
+@pytest.mark.asyncio
+async def test_history_top_rejects_invalid_kinds_shape():
+    server = RpcServer()
+
+    resp = await _call(server, "history.top", {"kinds": "queries"})
+
+    assert resp["error"]["code"] == ERR_INVALID_PARAMS
+    assert resp["error"]["message"] == "kinds must be list"
+
+
+@pytest.mark.asyncio
+async def test_history_top_rejects_unknown_kind():
+    server = RpcServer()
+
+    resp = await _call(server, "history.top", {"kinds": ["queries", "stars"]})
+
+    assert resp["error"]["code"] == ERR_INVALID_PARAMS
+    assert resp["error"]["message"] == "kinds contains unsupported value: stars"
+
+
+@pytest.mark.asyncio
 async def test_open_file_returns_structured_not_found_error(tmp_path: Path):
     server = RpcServer()
 
