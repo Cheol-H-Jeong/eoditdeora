@@ -64,42 +64,12 @@ def main() -> int:
     configure_logging()
     log = get_logger("eoditdeora.launcher")
 
-    # ---- bring up local services ----------------------------------------
-
-    # First-run bootstrap: auto add-root(~/Documents), autostart registration.
-    # Idempotent; runs on every launch so re-installs and profile resets
-    # recover the same defaults.
-    import asyncio
-
-    from eoditdeora.api.methods import _first_run_bootstrap
-
-    try:
-        result = asyncio.run(_first_run_bootstrap({}))
-        log.info("first_run_bootstrap", actions=result["actions"])
-    except Exception as e:  # noqa: BLE001
-        log.warning("first_run_bootstrap_failed", error=str(e))
-
-    # Indexer daemon — watches the registered roots.
-    from eoditdeora.indexer.daemon import get_daemon
-
-    get_daemon().start()
-    log.info("indexer_daemon_up")
-
-    # Log a one-shot probe of the configured endpoints so support bundles
-    # can confirm whether the user's inference server was reachable at
-    # launch. We do NOT spawn any model weights — that is the user's
-    # external serving layer's job.
-    def _probe_endpoints() -> None:
-        try:
-            from eoditdeora.runtime.supervisor import RuntimeSupervisor
-
-            log.info("endpoints_probe", **RuntimeSupervisor().health())
-        except Exception as e:  # noqa: BLE001
-            log.warning("endpoints_probe_failed", error=str(e))
-
-    threading.Thread(target=_probe_endpoints, name="eddr-endpoint-probe", daemon=True).start()
-
-    # HTTP bridge (same one the dev script uses).
+    # ---- stand up the HTTP bridge FIRST ---------------------------------
+    # Everything else (first-run bootstrap, indexer daemon, endpoint
+    # probes) is moved off the critical path so the window can appear
+    # in ~1 s instead of waiting ~9 s for network probes to finish.
+    # The UI polls `indexer.status` / `endpoints.health` and shows a
+    # "준비 중" state until the background boot completes.
     from importlib import import_module
 
     dev = import_module("dev_server")
@@ -113,8 +83,6 @@ def main() -> int:
                 pass
         log.error("ui_build_missing", path=str(build_dir))
         return 2
-    # The Handler imports BUILD relative to the script file — when we
-    # live inside PyInstaller onefile, sys._MEIPASS holds the right path.
     dev.BUILD = build_dir  # type: ignore[attr-defined]
 
     httpd = ThreadingHTTPServer(("127.0.0.1", args.port), dev.Handler)
@@ -124,6 +92,42 @@ def main() -> int:
     ).start()
     log.info("bridge_listening", port=args.port)
 
+    # ---- background boot -------------------------------------------------
+
+    def _background_boot() -> None:
+        """Run the slow, network-touching launch chores off the UI path.
+
+        Order matters: bootstrap can register a new root before the
+        daemon spins up, so the daemon picks it up on its first catch-up
+        scan rather than needing a refresh_roots() call.
+        """
+        import asyncio as _asyncio
+
+        from eoditdeora.api.methods import _first_run_bootstrap
+        from eoditdeora.indexer.daemon import get_daemon as _get_daemon
+        from eoditdeora.runtime.supervisor import RuntimeSupervisor
+
+        try:
+            result = _asyncio.run(_first_run_bootstrap({}))
+            log.info("first_run_bootstrap", actions=result["actions"])
+        except Exception as e:  # noqa: BLE001
+            log.warning("first_run_bootstrap_failed", error=str(e))
+
+        try:
+            _get_daemon().start()
+            log.info("indexer_daemon_up")
+        except Exception as e:  # noqa: BLE001
+            log.warning("indexer_daemon_start_failed", error=str(e))
+
+        try:
+            log.info("endpoints_probe", **RuntimeSupervisor().health())
+        except Exception as e:  # noqa: BLE001
+            log.warning("endpoints_probe_failed", error=str(e))
+
+    threading.Thread(
+        target=_background_boot, name="eddr-boot", daemon=True
+    ).start()
+
     if args.headless:
         log.info("headless_mode_running")
         try:
@@ -131,7 +135,12 @@ def main() -> int:
         except KeyboardInterrupt:
             pass
         finally:
-            get_daemon().stop()
+            try:
+                from eoditdeora.indexer.daemon import get_daemon
+
+                get_daemon().stop()
+            except Exception as e:  # noqa: BLE001
+                log.debug("daemon_stop_error", error=str(e))
             httpd.shutdown()
         return 0
 
@@ -152,7 +161,12 @@ def main() -> int:
         webview.start(gui="qt", debug=False)
     finally:
         log.info("window_closed_shutting_down")
-        get_daemon().stop()
+        try:
+            from eoditdeora.indexer.daemon import get_daemon
+
+            get_daemon().stop()
+        except Exception as e:  # noqa: BLE001
+            log.debug("daemon_stop_error", error=str(e))
         httpd.shutdown()
 
     return 0

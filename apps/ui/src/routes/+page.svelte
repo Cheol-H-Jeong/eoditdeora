@@ -177,6 +177,16 @@
     return progress.last_event_ts > 0 && nowSec - progress.last_event_ts < 3;
   }
 
+  function bootPending(): boolean {
+    // The launcher now brings up the daemon off the critical path. Until
+    // that background work finishes the indexer is not running AND no
+    // files have been touched yet. Show the user a 준비 중 banner so the
+    // empty state is understood as "loading" rather than "broken".
+    if (!progress) return true;
+    if (progress.running) return false;
+    return progress.stats.indexed === 0 && progress.last_event_ts === 0;
+  }
+
   // Reactive: typing in name mode triggers a debounced fast search so
   // results land as the user types without hammering the backend.
   $effect(() => {
@@ -369,7 +379,12 @@
     {#if warning}
       <div class="warning">{warning}</div>
     {/if}
-    {#if indexingActive() && progress}
+    {#if bootPending()}
+      <div class="progress boot" role="status" aria-live="polite">
+        <span class="spinner"></span>
+        <span class="progress-text">준비 중… 엔드포인트 확인 및 인덱서 초기화</span>
+      </div>
+    {:else if indexingActive() && progress}
       <div class="progress" role="status" aria-live="polite">
         <span class="spinner"></span>
         <span class="progress-text">
@@ -592,6 +607,11 @@
     display: flex;
     align-items: center;
     gap: 10px;
+  }
+  .progress.boot {
+    background: #171b25;
+    border-color: #28314a;
+    color: #a2b6e2;
   }
   .spinner {
     width: 12px;
