@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from eoditdeora.api.rpc_server import ERR_OPEN_FAILED, RpcServer
+from eoditdeora.api.rpc_server import ERR_INVALID_PARAMS, ERR_OPEN_FAILED, RpcServer
 from eoditdeora.storage.fast_index import FastIndex
 
 
@@ -102,6 +102,22 @@ async def test_search_non_positive_top_k_returns_no_results():
 
 
 @pytest.mark.asyncio
+async def test_search_rejects_non_integer_top_k():
+    server = RpcServer()
+    resp = await _call(server, "search", {"query": "예산", "top_k": "many"})
+    assert resp["error"]["code"] == ERR_INVALID_PARAMS
+    assert resp["error"]["message"] == "top_k must be integer"
+
+
+@pytest.mark.asyncio
+async def test_search_rejects_unknown_mode():
+    server = RpcServer()
+    resp = await _call(server, "search", {"query": "예산", "mode": "semantic"})
+    assert resp["error"]["code"] == ERR_INVALID_PARAMS
+    assert resp["error"]["message"] == "mode must be 'search' or 'ask'"
+
+
+@pytest.mark.asyncio
 async def test_files_search_negative_limit_returns_no_rows():
     idx = FastIndex()
     try:
@@ -113,6 +129,14 @@ async def test_files_search_negative_limit_returns_no_rows():
     resp = await _call(server, "files.search", {"query": "file", "limit": -1})
     assert resp["result"]["results"] == []
     assert resp["result"]["total_indexed"] == 3
+
+
+@pytest.mark.asyncio
+async def test_files_search_rejects_non_integer_limit():
+    server = RpcServer()
+    resp = await _call(server, "files.search", {"query": "file", "limit": "all"})
+    assert resp["error"]["code"] == ERR_INVALID_PARAMS
+    assert resp["error"]["message"] == "limit must be integer"
 
 
 @pytest.mark.asyncio

@@ -36,6 +36,18 @@ _DISK_USAGE_BUCKETS = (
 )
 
 
+def _parse_int_param(params: dict[str, Any], key: str, default: int) -> int:
+    from eoditdeora.api.rpc_server import ERR_INVALID_PARAMS, RpcError
+
+    raw = params.get(key, default)
+    if isinstance(raw, bool):
+        raise RpcError(ERR_INVALID_PARAMS, f"{key} must be integer")
+    try:
+        return int(raw)
+    except (TypeError, ValueError) as e:
+        raise RpcError(ERR_INVALID_PARAMS, f"{key} must be integer") from e
+
+
 def _normalize_extensions_param(raw: Any) -> list[str] | None:
     if not isinstance(raw, list) or not raw:
         return None
@@ -184,7 +196,7 @@ async def _files_search(params: dict[str, Any]) -> dict[str, Any]:
     from eoditdeora.storage.fast_index import FastIndex
 
     query = str(params.get("query", "")).strip()
-    limit = int(params.get("limit", 50))
+    limit = _parse_int_param(params, "limit", 50)
     exts = _normalize_extensions_param(params.get("exts"))
     idx = FastIndex()
     try:
@@ -227,13 +239,16 @@ async def _index_rescan(_: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _search(params: dict[str, Any]) -> dict[str, Any]:
+    from eoditdeora.api.rpc_server import ERR_INVALID_PARAMS, RpcError
     from eoditdeora.retriever.service import search as do_search
 
     query = str(params.get("query", "")).strip()
     if not query:
         return {"results": [], "query": ""}
-    top_k = int(params.get("top_k", 10))
+    top_k = _parse_int_param(params, "top_k", 10)
     mode = str(params.get("mode", "search"))  # "search" | "ask"
+    if mode not in {"search", "ask"}:
+        raise RpcError(ERR_INVALID_PARAMS, "mode must be 'search' or 'ask'")
     return await do_search(query=query, top_k=top_k, mode=mode)
 
 
