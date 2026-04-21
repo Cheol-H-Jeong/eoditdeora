@@ -15,6 +15,7 @@ from eoditdeora.parsers.registry import register
 from eoditdeora.utils.paths_util import display_path
 
 _NS = {
+    "office": "urn:oasis:names:tc:opendocument:xmlns:office:1.0",
     "draw": "urn:oasis:names:tc:opendocument:xmlns:drawing:1.0",
     "table": "urn:oasis:names:tc:opendocument:xmlns:table:1.0",
     "text": "urn:oasis:names:tc:opendocument:xmlns:text:1.0",
@@ -271,7 +272,7 @@ def _render_sheet_row(row: ET.Element) -> list[str]:
         tag = _local_name(cell.tag)
         if tag not in {"table-cell", "covered-table-cell"}:
             continue
-        text = _normalize_text(_element_text(cell))
+        text = _cell_text(cell)
         repeat = _safe_int(
             cell.attrib.get(_attr_name("table", "number-columns-repeated")),
             fallback=1,
@@ -300,6 +301,26 @@ def _element_text(elem: ET.Element) -> str:
         if text:
             parts.append(text)
     return "".join(parts)
+
+
+def _cell_text(cell: ET.Element) -> str:
+    text = _normalize_text(_element_text(cell))
+    if text:
+        return text
+
+    for attr in (
+        _attr_name("office", "string-value"),
+        _attr_name("office", "value"),
+        _attr_name("office", "date-value"),
+        _attr_name("office", "time-value"),
+        _attr_name("office", "boolean-value"),
+    ):
+        raw = cell.attrib.get(attr)
+        if raw is not None:
+            normalized = _normalize_text(raw)
+            if normalized:
+                return normalized
+    return ""
 
 
 def _normalize_text(text: str) -> str:

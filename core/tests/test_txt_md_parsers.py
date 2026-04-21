@@ -179,6 +179,42 @@ def test_ods_parser_extracts_sheet_rows(tmp_path: Path):
     assert res.doc.blocks[0].text == "항목\t금액\n운영비\t120000"
 
 
+def test_ods_parser_reads_attribute_only_cell_values(tmp_path: Path):
+    f = tmp_path / "typed-values.ods"
+    _write_odf_zip(
+        f,
+        content_xml=(
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<office:document-content '
+            'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+            'xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" '
+            'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">'
+            "<office:body><office:spreadsheet>"
+            '<table:table table:name="원본값">'
+            "<table:table-row>"
+            '<table:table-cell office:value-type="string" office:string-value="항목"/>'
+            '<table:table-cell office:value-type="string" office:string-value="값"/>'
+            "</table:table-row>"
+            "<table:table-row>"
+            '<table:table-cell office:value-type="string" office:string-value="운영비"/>'
+            '<table:table-cell office:value-type="float" office:value="120000"/>'
+            "</table:table-row>"
+            "<table:table-row>"
+            '<table:table-cell office:value-type="string" office:string-value="승인"/>'
+            '<table:table-cell office:value-type="boolean" office:boolean-value="true"/>'
+            "</table:table-row>"
+            "</table:table>"
+            "</office:spreadsheet></office:body>"
+            "</office:document-content>"
+        ),
+    )
+    res = OpenDocumentParser().parse(f, doc_id="sha256:" + "5" * 64)
+    assert res.doc.parse_status == "ok"
+    assert len(res.doc.blocks) == 1
+    assert res.doc.blocks[0].sheet == "원본값"
+    assert res.doc.blocks[0].text == "항목\t값\n운영비\t120000\n승인\ttrue"
+
+
 def test_odp_parser_extracts_slide_text(tmp_path: Path):
     f = tmp_path / "deck.odp"
     _write_odf_zip(
