@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from eoditdeora.api.rpc_server import RpcError
 from eoditdeora.retriever.hybrid import hybrid_search
 from eoditdeora.retriever.lexical import lexical_search
 from eoditdeora.retriever.rag import answer_strict
@@ -75,6 +76,8 @@ async def search(query: str, top_k: int = 10, mode: str = "search") -> dict[str,
     if mode == "ask":
         try:
             payload["answer"] = answer_strict(query, hits)
+        except RpcError:
+            raise
         except Exception as e:  # noqa: BLE001
             log.exception("search_answer_failed", error=str(e))
             payload["answer"] = {

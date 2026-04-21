@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from eoditdeora.api.rpc_server import ERR_UPSTREAM_UNAVAILABLE, RpcError
 from eoditdeora.retriever import service as service_mod
 
 
@@ -82,3 +83,28 @@ async def test_search_with_non_positive_top_k_short_circuits(
 
     result = await service_mod.search("질의", top_k=0)
     assert result == {"query": "질의", "results": []}
+
+
+@pytest.mark.asyncio
+async def test_ask_mode_preserves_structured_rpc_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        service_mod,
+        "hybrid_search",
+        lambda q, top_k=10: [{"chunk_id": "c1", "doc_id": "d1", "snippet": "s", "source_path": "/x"}],
+    )
+
+    def fail_answer(_q: str, _hits: list[dict[str, Any]]) -> dict[str, Any]:
+        raise RpcError(
+            ERR_UPSTREAM_UNAVAILABLE,
+            "추론 서버에 연결할 수 없습니다",
+            {"role": "llm", "detail": "connection refused"},
+        )
+
+    monkeypatch.setattr(service_mod, "answer_strict", fail_answer)
+
+    with pytest.raises(RpcError) as ei:
+        await service_mod.search("질의", top_k=3, mode="ask")
+
+    assert ei.value.code == ERR_UPSTREAM_UNAVAILABLE

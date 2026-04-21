@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from eoditdeora.api.rpc_server import RpcError
 from eoditdeora.runtime.clients import get_llm_client
 from eoditdeora.runtime.prompts import RAG_STRICT_SYSTEM, RAG_STRICT_USER
 from eoditdeora.utils.logging import get_logger
@@ -65,6 +66,8 @@ def answer_strict(question: str, hits: list[dict[str, Any]]) -> dict[str, Any]:
         text = client.chat(
             RAG_STRICT_SYSTEM, user_prompt, temperature=0.1, max_tokens=1024
         )
+    except RpcError:
+        raise
     except Exception as e:  # noqa: BLE001
         log.warning("llm_chat_failed", error=str(e))
         return {
