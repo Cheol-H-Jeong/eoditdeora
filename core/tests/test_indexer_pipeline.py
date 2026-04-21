@@ -363,6 +363,49 @@ def test_duplicate_content_in_different_paths_keeps_both_documents(tmp_path: Pat
     assert doc_ids == {first_doc["doc_id"], second_doc["doc_id"]}
 
 
+def test_duplicate_content_reuses_existing_parse_without_reparsing(
+    tmp_path: Path,
+    stores,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    meta, fts, vec = stores
+    root_a = tmp_path / "team-a"
+    root_b = tmp_path / "team-b"
+    root_a.mkdir()
+    root_b.mkdir()
+
+    first = root_a / "shared.txt"
+    second = root_b / "shared.txt"
+    content = "동일 본문 duplicate_reuse_marker_456"
+    first.write_text(content, encoding="utf-8")
+    second.write_text(content, encoding="utf-8")
+
+    first_result = index_file(_make_cf(first), meta=meta, fts=fts, vectors=vec)
+    assert first_result["status"] == "indexed"
+
+    def _unexpected_parse(*args, **kwargs):
+        raise AssertionError("duplicate content should reuse the existing parse")
+
+    monkeypatch.setattr(pipeline, "_parse_with_timeout", _unexpected_parse)
+
+    second_result = index_file(_make_cf(second), meta=meta, fts=fts, vectors=vec)
+
+    assert second_result["status"] == "indexed"
+    first_doc = meta.get_document_by_path(str(first.resolve()))
+    second_doc = meta.get_document_by_path(str(second.resolve()))
+    assert first_doc is not None
+    assert second_doc is not None
+    assert first_doc["parser"] == second_doc["parser"]
+    assert first_doc["warnings_json"] == second_doc["warnings_json"]
+
+    second_chunks = meta.get_chunks_for_doc(str(second_doc["doc_id"]))
+    assert second_chunks
+    assert all(str(row["chunk_id"]).startswith(f"{second_doc['doc_id']}:") for row in second_chunks)
+
+    doc_ids = {hit["doc_id"] for hit in fts.search("duplicate_reuse_marker_456", top_k=10)}
+    assert doc_ids == {first_doc["doc_id"], second_doc["doc_id"]}
+
+
 def test_move_over_existing_path_purges_displaced_search_rows(tmp_path: Path, stores):
     meta, fts, vec = stores
     src = tmp_path / "source.txt"

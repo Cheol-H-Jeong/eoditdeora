@@ -122,6 +122,108 @@ def _clear_indexed_payload(
     vectors.delete_doc(doc_id)
 
 
+def _can_reuse_existing_parse(record: dict[str, object] | None) -> bool:
+    if not record:
+        return False
+    try:
+        payload = json.loads(str(record.get("warnings_json") or "{}"))
+    except json.JSONDecodeError:
+        return False
+    return payload.get("status") == "indexed"
+
+
+def _clone_chunks_for_doc(
+    *,
+    source_doc_id: str,
+    target_doc_id: str,
+    meta: MetaStore,
+) -> list[dict[str, object]]:
+    source_chunks = meta.get_chunks_for_doc(source_doc_id)
+    cloned: list[dict[str, object]] = []
+    for row in source_chunks:
+        ordinal = int(row["ordinal"])
+        cloned.append(
+            {
+                "chunk_id": f"{target_doc_id}:{ordinal}",
+                "doc_id": target_doc_id,
+                "ordinal": ordinal,
+                "block_type": row["block_type"],
+                "page": row["page"],
+                "sheet": row["sheet"],
+                "text": row["text"],
+                "char_start": row["char_start"],
+                "char_end": row["char_end"],
+                "token_count": row["token_count"],
+            }
+        )
+    return cloned
+
+
+def _reuse_duplicate_parse(
+    *,
+    cf: CollectedFile,
+    path: Path,
+    doc_id: str,
+    canonical_doc: dict[str, object],
+    meta: MetaStore,
+    fts: FtsStore,
+    current_size: int,
+    current_mtime_ns: int,
+) -> dict[str, int | str]:
+    now_ns = time.time_ns()
+    meta.upsert_document(
+        {
+            "doc_id": doc_id,
+            "root": str(cf.root),
+            "source_path": str(path),
+            "source_path_display": display_path(path),
+            "format": canonical_doc["format"],
+            "parser": canonical_doc["parser"],
+            "fidelity": canonical_doc["fidelity"],
+            "size_bytes": current_size,
+            "mtime_ns": current_mtime_ns,
+            "indexed_at": now_ns,
+            "classification": canonical_doc["classification"],
+            "summary_oneline": canonical_doc["summary_oneline"],
+            "summary_paragraph": canonical_doc["summary_paragraph"],
+            "summary_detailed": canonical_doc["summary_detailed"],
+            "language": canonical_doc["language"],
+            "warnings_json": canonical_doc["warnings_json"],
+            "metadata_json": canonical_doc["metadata_json"],
+        }
+    )
+    chunk_rows = _clone_chunks_for_doc(
+        source_doc_id=str(canonical_doc["doc_id"]),
+        target_doc_id=doc_id,
+        meta=meta,
+    )
+    meta.replace_chunks(doc_id, chunk_rows)
+    fts.upsert(
+        [
+            {"chunk_id": str(r["chunk_id"]), "doc_id": str(r["doc_id"]), "text": str(r["text"])}
+            for r in chunk_rows
+        ]
+    )
+    meta.enqueue_job(
+        "embed",
+        json.dumps({"doc_id": doc_id, "chunk_ids": [str(r["chunk_id"]) for r in chunk_rows]}),
+        priority=50,
+    )
+    meta.enqueue_job(
+        "understand",
+        json.dumps({"doc_id": doc_id}),
+        priority=80,
+    )
+    log.info(
+        "indexed_duplicate_reused_parse",
+        path=str(path),
+        doc_id=doc_id,
+        canonical_doc_id=str(canonical_doc["doc_id"]),
+        chunks=len(chunk_rows),
+    )
+    return {"status": "indexed", "path": str(path), "chunks": len(chunk_rows)}
+
+
 def _parse_with_timeout(path: Path, *, doc_id: str, timeout_sec: int):
     done = threading.Event()
     result_queue: "queue.Queue[tuple[str, object]]" = queue.Queue(maxsize=1)
@@ -309,6 +411,25 @@ def index_file(
             meta=meta,
             fts=fts,
             vectors=vectors,
+        )
+
+    canonical_doc = None
+    if "#" in doc_id:
+        content_doc_id = doc_id.split("#", 1)[0]
+        maybe_canonical = meta.get_document(content_doc_id)
+        if _can_reuse_existing_parse(maybe_canonical):
+            canonical_doc = maybe_canonical
+
+    if canonical_doc is not None:
+        return _reuse_duplicate_parse(
+            cf=cf,
+            path=path,
+            doc_id=doc_id,
+            canonical_doc=canonical_doc,
+            meta=meta,
+            fts=fts,
+            current_size=current_size,
+            current_mtime_ns=current_stat.st_mtime_ns,
         )
 
     timeout_sec = max(1, int(settings.index.parser_timeout_sec))
