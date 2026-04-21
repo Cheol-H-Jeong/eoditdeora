@@ -77,6 +77,42 @@ function formatInvalidParamsMessage(error: RpcInvokeError): string | null {
   return null;
 }
 
+function formatBadRequestMessage(error: RpcInvokeError): string {
+  const role = roleLabel(error.data?.role);
+  const status = error.data?.status;
+  const endpoint = formatEndpointUrl(error.data?.url);
+  const statusHint = typeof status === "number" ? ` (HTTP ${status})` : "";
+  const endpointHint = endpoint ? ` (${endpoint})` : "";
+  const detail = typeof error.data?.detail === "string" ? error.data.detail.toLowerCase() : "";
+
+  if (
+    detail.includes("context length") ||
+    detail.includes("maximum context") ||
+    detail.includes("max context") ||
+    detail.includes("token limit") ||
+    detail.includes("too many tokens") ||
+    detail.includes("prompt is too long") ||
+    detail.includes("requested tokens") ||
+    detail.includes("maximum tokens")
+  ) {
+    return `${role} 서버가 요청 길이를 거부했습니다${statusHint}${endpointHint}. 질문을 더 짧게 하거나 검색 범위를 줄인 뒤 다시 시도하세요.${detailSuffix(error.data?.detail)}`;
+  }
+
+  if (
+    detail.includes("model is required") ||
+    detail.includes("model_id") ||
+    detail.includes("model id") ||
+    detail.includes("unknown model") ||
+    detail.includes("no such model") ||
+    detail.includes("model_not_found") ||
+    detail.includes("model name")
+  ) {
+    return `${role} 서버의 모델 ID가 비어 있거나 올바르지 않습니다${statusHint}${endpointHint}. 설정에서 모델 ID를 확인하세요.${detailSuffix(error.data?.detail)}`;
+  }
+
+  return `${role} 서버가 요청을 거부했습니다${statusHint}${endpointHint}. 모델 ID, 요청 형식, OpenAI 호환 API 설정을 확인하세요.${detailSuffix(error.data?.detail)}`;
+}
+
 export function formatRpcError(error: unknown): string {
   if (isRpcInvokeError(error)) {
     const code = error.code;
@@ -105,6 +141,9 @@ export function formatRpcError(error: unknown): string {
     }
     if (code === -32014) {
       return `${role} 서버 요청 한도에 걸렸습니다. 잠시 후 다시 시도하거나 동시 요청 수를 줄이세요.`;
+    }
+    if (code === -32016) {
+      return formatBadRequestMessage(error);
     }
     if (code === -32015) {
       const reason = error.data?.reason;
