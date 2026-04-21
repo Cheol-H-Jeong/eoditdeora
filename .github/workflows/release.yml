@@ -1,32 +1,75 @@
 name: release
 
+# When a v* tag is pushed:
+#   1. build.yml matrix (test + linux-installer + windows-installer) runs first
+#      because push-tag fires that workflow's own tag trigger.
+#   2. this workflow waits for those artifacts via workflow_run, then attaches
+#      the .AppImage and .exe installers to a GitHub Release so users can
+#      download a single file per OS directly from the repo page.
 on:
-  push:
-    tags: ["v*"]
+  workflow_run:
+    workflows: ["build"]
+    types: [completed]
+    branches-ignore: ["**"]   # only fire when triggered by a tag push
+
+permissions:
+  contents: write
+  actions: read
 
 jobs:
-  create-release:
-    runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create.outputs.upload_url }}
+  publish:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'v')
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - id: create
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Download Linux installer
+        uses: actions/download-artifact@v4
+        with:
+          name: eoditdeora-linux-appimage
+          path: dist/linux
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Download Windows installer
+        uses: actions/download-artifact@v4
+        with:
+          name: eoditdeora-windows-installer
+          path: dist/windows
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: List payload
+        run: |
+          echo "Linux:"; ls -lh dist/linux
+          echo "Windows:"; ls -lh dist/windows
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          draft: true
-          prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') }}
+          tag_name: ${{ github.event.workflow_run.head_branch }}
+          name: ${{ github.event.workflow_run.head_branch }}
+          draft: false
+          prerelease: ${{ contains(github.event.workflow_run.head_branch, '-rc') || contains(github.event.workflow_run.head_branch, '-beta') }}
           generate_release_notes: true
+          body: |
+            어딨더라 — Local document knowledge base.
 
-  attach-installers:
-    needs: create-release
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-      - uses: softprops/action-gh-release@v2
-        with:
+            ## Download
+            - **Windows 10/11 x64**: `Eoditdeora-*-setup.exe` — double-click to install.
+            - **Linux x64**:         `Eoditdeora-*-x86_64.AppImage` — `chmod +x` then double-click.
+
+            After install, launch once. The app:
+              - registers auto-start on user login,
+              - watches `~/Documents` (or `~/문서`) out of the box,
+              - brings up the local LLM backends automatically when model
+                weights are present (see Settings → Local LLM Models).
+
+            Full install guide: [docs/INSTALL.md](docs/INSTALL.md).
           files: |
-            artifacts/eoditdeora-linux-installers/*
-            artifacts/eoditdeora-windows-installers/*
+            dist/linux/*
+            dist/windows/*
