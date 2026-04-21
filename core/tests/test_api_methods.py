@@ -54,6 +54,26 @@ async def test_index_add_root_and_status(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_index_add_root_rejects_missing_path():
+    server = RpcServer()
+
+    resp = await _call(server, "index.add_root", {})
+
+    assert resp["error"]["code"] == ERR_INVALID_PARAMS
+    assert resp["error"]["message"] == "missing 'path'"
+
+
+@pytest.mark.asyncio
+async def test_index_add_root_rejects_blank_path():
+    server = RpcServer()
+
+    resp = await _call(server, "index.add_root", {"path": "   "})
+
+    assert resp["error"]["code"] == ERR_INVALID_PARAMS
+    assert resp["error"]["message"] == "missing 'path'"
+
+
+@pytest.mark.asyncio
 async def test_index_remove_root(tmp_path: Path):
     docs = tmp_path / "watched"
     docs.mkdir()
@@ -64,6 +84,26 @@ async def test_index_remove_root(tmp_path: Path):
     assert resp["result"]["removed"] == 1
     search = await _call(server, "files.search", {"query": "draft"})
     assert search["result"]["results"] == []
+
+
+@pytest.mark.asyncio
+async def test_index_remove_root_rejects_missing_path():
+    server = RpcServer()
+
+    resp = await _call(server, "index.remove_root", {})
+
+    assert resp["error"]["code"] == ERR_INVALID_PARAMS
+    assert resp["error"]["message"] == "missing 'path'"
+
+
+@pytest.mark.asyncio
+async def test_index_remove_root_rejects_blank_path():
+    server = RpcServer()
+
+    resp = await _call(server, "index.remove_root", {"path": " \t "})
+
+    assert resp["error"]["code"] == ERR_INVALID_PARAMS
+    assert resp["error"]["message"] == "missing 'path'"
 
 
 @pytest.mark.asyncio

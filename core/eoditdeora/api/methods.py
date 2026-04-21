@@ -57,6 +57,18 @@ def _parse_int_param(
     return value
 
 
+def _parse_path_param(params: dict[str, Any], key: str = "path") -> str:
+    from eoditdeora.api.rpc_server import ERR_INVALID_PARAMS, RpcError
+
+    raw = params.get(key)
+    if raw is None:
+        raise RpcError(ERR_INVALID_PARAMS, f"missing '{key}'")
+    value = str(raw).strip()
+    if not value:
+        raise RpcError(ERR_INVALID_PARAMS, f"missing '{key}'")
+    return value
+
+
 def _normalize_extensions_param(raw: Any) -> list[str] | None:
     if not isinstance(raw, list) or not raw:
         return None
@@ -264,14 +276,14 @@ async def _search(params: dict[str, Any]) -> dict[str, Any]:
 async def _index_add_root(params: dict[str, Any]) -> dict[str, Any]:
     from eoditdeora.collector.service import add_root
 
-    path = str(params["path"])
+    path = _parse_path_param(params)
     return await add_root(path)
 
 
 async def _index_remove_root(params: dict[str, Any]) -> dict[str, Any]:
     from eoditdeora.collector.service import remove_root
 
-    path = str(params["path"])
+    path = _parse_path_param(params)
     return await remove_root(path)
 
 
