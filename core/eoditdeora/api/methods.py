@@ -290,14 +290,18 @@ async def _open_file(params: dict[str, Any]) -> dict[str, Any]:
     import sys
     from pathlib import Path
 
-    from eoditdeora.api.rpc_server import ERR_INVALID_PARAMS, RpcError
+    from eoditdeora.api.rpc_server import ERR_INVALID_PARAMS, ERR_OPEN_FAILED, RpcError
 
     raw = params.get("path")
     if not raw:
         raise RpcError(ERR_INVALID_PARAMS, "missing 'path'")
     target = Path(str(raw)).expanduser()
     if not target.exists():
-        return {"ok": False, "error": "not_found", "path": str(target)}
+        raise RpcError(
+            ERR_OPEN_FAILED,
+            "open failed",
+            {"reason": "not_found", "path": str(target)},
+        )
 
     try:
         if sys.platform == "win32":
@@ -313,9 +317,17 @@ async def _open_file(params: dict[str, Any]) -> dict[str, Any]:
                 start_new_session=True,
             )
     except FileNotFoundError as e:
-        return {"ok": False, "error": "launcher_missing", "detail": str(e)}
+        raise RpcError(
+            ERR_OPEN_FAILED,
+            "open failed",
+            {"reason": "launcher_missing", "path": str(target), "detail": str(e)},
+        ) from e
     except Exception as e:  # noqa: BLE001
-        return {"ok": False, "error": "spawn_failed", "detail": str(e)}
+        raise RpcError(
+            ERR_OPEN_FAILED,
+            "open failed",
+            {"reason": "spawn_failed", "path": str(target), "detail": str(e)},
+        ) from e
     try:
         from eoditdeora.storage.history import HistoryStore
 

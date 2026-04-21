@@ -290,6 +290,15 @@
     }
   }
 
+  async function openPath(path: string) {
+    try {
+      await openInOs(path);
+      errorMessage = null;
+    } catch (e) {
+      errorMessage = formatRpcError(e);
+    }
+  }
+
   function onKeydown(e: KeyboardEvent) {
     // Esc clears the query from anywhere.
     if (e.key === "Escape") {
@@ -318,7 +327,7 @@
     if (e.key === "Enter") {
       if (selectedIndex >= 0 && selectedIndex < results.length) {
         e.preventDefault();
-        void openInOs(results[selectedIndex].path);
+        void openPath(results[selectedIndex].path);
         return;
       }
       if (mode === "content") void runContentSearch(query, false);
@@ -477,7 +486,7 @@
               class="file-row"
               class:selected={i === selectedIndex}
               data-result-index={i}
-              onclick={() => openInOs(r.path)}
+              onclick={() => void openPath(r.path)}
             >
               <div class="file-name">
                 <span class="ext-chip">{r.ext || "file"}</span>
@@ -528,7 +537,7 @@
                   <ul class="recent-paths">
                     {#each recentOpens as ro}
                       <li>
-                        <button class="recent-path" onclick={() => openInOs(ro.path)}>
+                        <button class="recent-path" onclick={() => void openPath(ro.path)}>
                           {ro.path.split(/[\\/]/).pop()}
                           <span class="recent-dir">{ro.path.split(/[\\/]/).slice(0, -1).join("/") || "/"}</span>
                         </button>
@@ -549,7 +558,7 @@
               class="card"
               class:selected={i === selectedIndex}
               data-result-index={i}
-              onclick={() => openInOs(hit.source_path_display)}
+              onclick={() => void openPath(hit.source_path_display)}
             >
               <div class="title">
                 {hit.title || basename(hit.source_path_display)}
@@ -584,7 +593,7 @@
             <ol class="citations">
               {#each aiResponse.answer.citations as c}
                 <li>
-                  <button class="cite" onclick={() => openInOs(c.source_path_display)}>
+                  <button class="cite" onclick={() => void openPath(c.source_path_display)}>
                     §{c.index} — {c.source_path_display}
                   </button>
                 </li>
@@ -600,7 +609,7 @@
               class="card"
               class:selected={i === selectedIndex}
               data-result-index={i}
-              onclick={() => openInOs(hit.source_path_display)}
+              onclick={() => void openPath(hit.source_path_display)}
             >
               <div class="title">
                 {hit.title || basename(hit.source_path_display)}

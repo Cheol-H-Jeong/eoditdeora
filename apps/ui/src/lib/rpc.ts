@@ -9,6 +9,8 @@ export type RpcInvokeError = {
     url?: string;
     status?: number;
     detail?: string;
+    reason?: string;
+    path?: string;
   } | null;
 };
 
@@ -42,6 +44,12 @@ function formatEndpointUrl(url: unknown): string {
 function detailSuffix(detail: unknown): string {
   if (typeof detail !== "string" || !detail.trim()) return "";
   return ` 상세: ${detail.trim()}`;
+}
+
+function basename(path: unknown): string {
+  if (typeof path !== "string" || !path.trim()) return "파일";
+  const normalized = path.split(/[\\/]/).filter(Boolean);
+  return normalized.at(-1) || path;
 }
 
 function formatInvalidParamsMessage(error: RpcInvokeError): string | null {
@@ -93,6 +101,20 @@ export function formatRpcError(error: unknown): string {
     }
     if (code === -32014) {
       return `${role} 서버 요청 한도에 걸렸습니다. 잠시 후 다시 시도하거나 동시 요청 수를 줄이세요.`;
+    }
+    if (code === -32015) {
+      const reason = error.data?.reason;
+      const name = basename(error.data?.path);
+      if (reason === "not_found") {
+        return `${name} 파일을 찾을 수 없습니다. 이동되었거나 삭제되었는지 확인하세요.`;
+      }
+      if (reason === "launcher_missing") {
+        return `파일을 열 프로그램 연결을 찾지 못했습니다. 운영체제 기본 앱 연결을 확인하세요.${detailSuffix(error.data?.detail)}`;
+      }
+      if (reason === "spawn_failed") {
+        return `파일을 여는 중 오류가 발생했습니다.${detailSuffix(error.data?.detail)}`;
+      }
+      return "파일을 열 수 없습니다. 잠시 후 다시 시도하세요.";
     }
     if (code === -32700) {
       return "앱과 백엔드 사이의 통신 형식이 손상되었습니다. 앱을 다시 실행하세요.";

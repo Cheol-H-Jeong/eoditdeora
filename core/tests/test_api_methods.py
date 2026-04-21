@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from eoditdeora.api.rpc_server import RpcServer
+from eoditdeora.api.rpc_server import ERR_OPEN_FAILED, RpcServer
 from eoditdeora.storage.fast_index import FastIndex
 
 
@@ -135,3 +137,39 @@ async def test_history_clear_rpc():
     resp = await _call(server, "history.top", {"kinds": ["queries"]})
 
     assert resp["result"]["queries"] == []
+
+
+@pytest.mark.asyncio
+async def test_open_file_returns_structured_not_found_error(tmp_path: Path):
+    server = RpcServer()
+
+    missing = tmp_path / "missing.txt"
+    resp = await _call(server, "open_file", {"path": str(missing)})
+
+    assert resp["error"]["code"] == ERR_OPEN_FAILED
+    assert resp["error"]["message"] == "open failed"
+    assert resp["error"]["data"] == {"reason": "not_found", "path": str(missing)}
+
+
+@pytest.mark.asyncio
+async def test_open_file_returns_structured_launcher_missing_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    server = RpcServer()
+    target = tmp_path / "sample.txt"
+    target.write_text("x", encoding="utf-8")
+
+    def fake_popen(*_args: Any, **_kwargs: Any):  # type: ignore[no-untyped-def]
+        raise FileNotFoundError("xdg-open missing")
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    resp = await _call(server, "open_file", {"path": str(target)})
+
+    assert resp["error"]["code"] == ERR_OPEN_FAILED
+    assert resp["error"]["message"] == "open failed"
+    assert resp["error"]["data"]["reason"] == "launcher_missing"
+    assert resp["error"]["data"]["path"] == str(target)
+    assert "xdg-open missing" in resp["error"]["data"]["detail"]
