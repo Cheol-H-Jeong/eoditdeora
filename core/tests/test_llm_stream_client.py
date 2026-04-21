@@ -5,7 +5,7 @@ from collections.abc import Iterator
 import httpx
 import pytest
 
-from eoditdeora.api.rpc_server import ERR_UPSTREAM_UNAVAILABLE, RpcError
+from eoditdeora.api.rpc_server import ERR_UPSTREAM_RATE_LIMIT, ERR_UPSTREAM_UNAVAILABLE, RpcError
 from eoditdeora.runtime.clients import LlmClient
 
 
@@ -91,3 +91,15 @@ def test_chat_stream_wraps_network_errors(monkeypatch: pytest.MonkeyPatch):
     with pytest.raises(RpcError) as ei:
         list(client.chat_stream("sys", "usr"))
     assert ei.value.code == ERR_UPSTREAM_UNAVAILABLE
+
+
+def test_chat_stream_surfaces_rate_limit(monkeypatch: pytest.MonkeyPatch):
+    def fake_stream(_method: str, _url: str, **_kwargs):
+        return _MockStreamResponse([], status_code=429)
+
+    monkeypatch.setattr(httpx, "stream", fake_stream)
+    client = LlmClient("127.0.0.1", 0)
+
+    with pytest.raises(RpcError) as ei:
+        list(client.chat_stream("sys", "usr"))
+    assert ei.value.code == ERR_UPSTREAM_RATE_LIMIT

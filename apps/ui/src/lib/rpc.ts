@@ -45,6 +45,9 @@ export function formatRpcError(error: unknown): string {
     if (code === -32013) {
       return `${role} 서버 응답 형식이 올바르지 않습니다. OpenAI 호환 API인지 확인하세요.`;
     }
+    if (code === -32014) {
+      return `${role} 서버 요청 한도에 걸렸습니다. 잠시 후 다시 시도하거나 동시 요청 수를 줄이세요.`;
+    }
     if (typeof error.message === "string" && error.message.trim()) {
       return error.message;
     }

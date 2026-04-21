@@ -22,6 +22,7 @@ from eoditdeora.api.rpc_server import (
     ERR_UPSTREAM_AUTH,
     ERR_UPSTREAM_BAD_RESPONSE,
     ERR_UPSTREAM_NOT_FOUND,
+    ERR_UPSTREAM_RATE_LIMIT,
     ERR_UPSTREAM_UNAVAILABLE,
     RpcError,
 )
@@ -66,6 +67,12 @@ def _raise_upstream_for_status(r: httpx.Response, url: str, role: str) -> None:
         raise RpcError(
             ERR_UPSTREAM_NOT_FOUND,
             "엔드포인트 경로 또는 모델 ID를 찾을 수 없습니다",
+            data,
+        )
+    if r.status_code == 429:
+        raise RpcError(
+            ERR_UPSTREAM_RATE_LIMIT,
+            "요청이 너무 많아 잠시 제한되었습니다",
             data,
         )
     if r.status_code >= 500:

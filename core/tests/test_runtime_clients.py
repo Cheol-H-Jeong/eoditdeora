@@ -15,6 +15,7 @@ import pytest
 from eoditdeora.api.rpc_server import (
     ERR_UPSTREAM_AUTH,
     ERR_UPSTREAM_NOT_FOUND,
+    ERR_UPSTREAM_RATE_LIMIT,
     ERR_UPSTREAM_UNAVAILABLE,
     RpcError,
 )
@@ -223,12 +224,25 @@ def test_llm_non_json_body_raises_bad_response():
     assert ei.value.code == ERR_UPSTREAM_BAD_RESPONSE
 
 
-def test_llm_400_generic_4xx_raises_unavailable():
-    # 400/422/429 are not auth or route errors but the user still can't
-    # get an answer. They fold into the generic unavailable bucket so
-    # the UI gets a sensible "추론 서버 오류" message.
+def test_llm_429_raises_rate_limit_after_retries(monkeypatch: pytest.MonkeyPatch):
+    attempts = {"count": 0}
+    monkeypatch.setattr("eoditdeora.runtime.clients.time.sleep", lambda _sec: None)
+
     def handler(_req: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
         return httpx.Response(429, json={"error": "rate limited"})
+
+    client = LlmClient("127.0.0.1", 0)
+    client._client = _mock_client(handler)  # type: ignore[attr-defined]
+    with pytest.raises(RpcError) as ei:
+        client.chat("s", "u")
+    assert ei.value.code == ERR_UPSTREAM_RATE_LIMIT
+    assert attempts["count"] == 3
+
+
+def test_llm_400_generic_4xx_raises_unavailable():
+    def handler(_req: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"error": "bad request"})
 
     client = LlmClient("127.0.0.1", 0)
     client._client = _mock_client(handler)  # type: ignore[attr-defined]

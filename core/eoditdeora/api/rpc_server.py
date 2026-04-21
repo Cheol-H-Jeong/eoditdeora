@@ -53,6 +53,7 @@ ERR_UPSTREAM_AUTH = -32010          # 401 / 403 from the model server
 ERR_UPSTREAM_NOT_FOUND = -32011     # 404 — wrong base URL or model id
 ERR_UPSTREAM_UNAVAILABLE = -32012   # 5xx or connection error
 ERR_UPSTREAM_BAD_RESPONSE = -32013  # 200 but body not parseable
+ERR_UPSTREAM_RATE_LIMIT = -32014    # 429 — upstream is throttling requests
 
 
 class RpcServer:
