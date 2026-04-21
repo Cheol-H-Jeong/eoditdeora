@@ -48,6 +48,20 @@ class HwpxParser:
         return path.suffix.lower() == ".hwpx"
 
     def parse(self, path: Path, *, doc_id: str) -> ParseResult:
+        if not path.exists():
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="hwpx",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status="file_missing",
+                    warnings=["file_missing"],
+                )
+            )
+
         warnings: list[str] = []
         blocks: list[Block] = []
         metadata: dict[str, object] = {"application": "Hancom Office (HWPX)"}
@@ -55,7 +69,31 @@ class HwpxParser:
         try:
             zf = zipfile.ZipFile(path)
         except zipfile.BadZipFile as e:
-            raise ParserError(f"hwpx_not_zip: {e}") from e
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="hwpx",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status="invalid_format",
+                    warnings=[f"hwpx_not_zip: {e}"],
+                )
+            )
+        except Exception as e:  # noqa: BLE001
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="hwpx",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status="parser_error",
+                    warnings=[f"hwpx_open_failed: {e}"],
+                )
+            )
 
         with zf:
             names = zf.namelist()

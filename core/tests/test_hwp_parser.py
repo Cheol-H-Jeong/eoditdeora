@@ -63,8 +63,9 @@ def test_hwp_parser_converts_library_errors_to_parser_error(
     _install_fake_hwp5(monkeypatch, [], raise_on_open=RuntimeError("bad cfb"))
     path = tmp_path / "bad.hwp"
     path.write_bytes(b"x")
-    with pytest.raises(ParserError):
-        PyhwpParser().parse(path, doc_id="sha256:" + "7" * 64)
+    res = PyhwpParser().parse(path, doc_id="sha256:" + "7" * 64)
+    assert res.doc.parse_status == "parser_error"
+    assert any("bad cfb" in w for w in res.doc.warnings)
 
 
 def test_hwp_parser_can_parse():
@@ -76,8 +77,9 @@ def test_hwp_parser_can_parse():
 
 
 def test_hwp_parser_missing_library_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """If pyhwp disappears at runtime we surface ParserError so the
-    registry can fall back to the filename stub."""
+    """If pyhwp disappears at runtime the parser surfaces parse_status=
+    parser_error so the pipeline records the file as skipped rather
+    than crashing the indexer."""
     import builtins
 
     real_import = builtins.__import__
@@ -90,5 +92,6 @@ def test_hwp_parser_missing_library_raises(tmp_path: Path, monkeypatch: pytest.M
     monkeypatch.setattr(builtins, "__import__", fail_import)
     path = tmp_path / "x.hwp"
     path.write_bytes(b"x")
-    with pytest.raises(ParserError):
-        PyhwpParser().parse(path, doc_id="sha256:" + "6" * 64)
+    res = PyhwpParser().parse(path, doc_id="sha256:" + "6" * 64)
+    assert res.doc.parse_status == "parser_error"
+    assert any("pyhwp_not_available" in w or "simulated missing hwp5" in w for w in res.doc.warnings)

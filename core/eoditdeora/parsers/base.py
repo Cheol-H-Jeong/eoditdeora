@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field
 
@@ -54,6 +54,9 @@ class ParsedDoc(BaseModel):
     images: list[Image] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
+    parse_status: Literal[
+        "ok", "empty", "encrypted", "invalid_format", "file_missing", "parser_error"
+    ] = "ok"
     parse_ms: int | None = None
 
 

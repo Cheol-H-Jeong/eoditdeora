@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from eoditdeora.parsers.base import Block, ParsedDoc, ParseResult, ParserError
+from eoditdeora.parsers.base import Block, ParsedDoc, ParseResult
 from eoditdeora.parsers.registry import register
 from eoditdeora.utils.paths_util import display_path
 
@@ -27,6 +27,20 @@ class PyhwpParser:
         return path.suffix.lower() == ".hwp"
 
     def parse(self, path: Path, *, doc_id: str) -> ParseResult:
+        if not path.exists():
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="hwp",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status="file_missing",
+                    warnings=["file_missing"],
+                )
+            )
+
         try:
             # pyhwp's public surface changed across versions; we tolerate
             # both the legacy `hwp5.xmlmodel` and the newer `hwp5.proc`
@@ -34,12 +48,34 @@ class PyhwpParser:
             from hwp5 import hwp5odt  # noqa: F401 — ensure import works
             from hwp5.hwp5txt import main as _hwp5txt_main  # type: ignore[import-not-found]
         except ImportError as e:
-            raise ParserError(f"pyhwp_not_available: {e}") from e
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="hwp",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status="parser_error",
+                    warnings=[f"pyhwp_not_available: {e}"],
+                )
+            )
 
         try:
             text = _extract_text(path)
         except Exception as e:  # noqa: BLE001
-            raise ParserError(f"hwp_extract_failed: {e}") from e
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="hwp",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status="parser_error",
+                    warnings=[f"hwp_extract_failed: {e}"],
+                )
+            )
 
         blocks: list[Block] = []
         for para in _split_paragraphs(text):

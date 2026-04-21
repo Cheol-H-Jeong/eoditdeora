@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from eoditdeora.parsers.base import Block, ParsedDoc, ParseResult, ParserError
+from eoditdeora.parsers.base import Block, ParsedDoc, ParseResult
 from eoditdeora.parsers.registry import register
 from eoditdeora.utils.paths_util import display_path
 
-_ENCODINGS = ("utf-8", "cp949", "euc-kr", "utf-16", "latin-1")
+_ENCODINGS = ("utf-8", "cp949", "euc-kr")
 
 
 class TxtParser:
@@ -20,10 +20,49 @@ class TxtParser:
         return path.suffix.lower().lstrip(".") in self.supported_extensions
 
     def parse(self, path: Path, *, doc_id: str) -> ParseResult:
+        if not path.exists():
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="txt",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status="file_missing",
+                    warnings=["file_missing"],
+                )
+            )
+
         raw = path.read_bytes()
+        if not raw:
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="txt",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status="empty",
+                    warnings=["empty_file"],
+                )
+            )
+
         text, encoding_used = _decode(raw)
         if text is None:
-            raise ParserError("no_compatible_encoding")
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="txt",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status="invalid_format",
+                    warnings=["no_compatible_encoding"],
+                )
+            )
         blocks = [Block(type="paragraph", text=p) for p in _split_paragraphs(text)]
         doc = ParsedDoc(
             doc_id=doc_id,

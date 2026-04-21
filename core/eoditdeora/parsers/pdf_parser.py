@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from eoditdeora.parsers.base import Block, ParsedDoc, ParseResult, ParserError
+from eoditdeora.parsers.base import Block, ParsedDoc, ParseResult
 from eoditdeora.parsers.registry import register
 from eoditdeora.utils.paths_util import display_path
 
@@ -25,19 +25,124 @@ class PdfTextLayerParser:
         return path.suffix.lower() == ".pdf"
 
     def parse(self, path: Path, *, doc_id: str) -> ParseResult:
+        if not path.exists():
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="pdf",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status="file_missing",
+                    warnings=["file_missing"],
+                )
+            )
+
+        raw = path.read_bytes()
+        if not raw:
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="pdf",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status="empty",
+                    warnings=["empty_file"],
+                )
+            )
+        if raw[:5] != b"%PDF-":
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="pdf",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status="invalid_format",
+                    warnings=["invalid_pdf_header"],
+                )
+            )
+
         try:
+            import pypdfium2  # type: ignore[import-not-found]
             import pdfplumber  # type: ignore[import-not-found]
         except ImportError as e:
-            raise ParserError("pdfplumber not available") from e
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="pdf",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status="parser_error",
+                    warnings=[f"pdf_dependency_missing: {e}"],
+                )
+            )
 
         warnings: list[str] = []
         blocks: list[Block] = []
         metadata: dict[str, object] = {"application": "PDF"}
 
         try:
+            pdfium_doc = pypdfium2.PdfDocument(str(path))
+        except Exception as e:  # noqa: BLE001
+            low = str(e).lower()
+            parse_status = "encrypted" if ("password" in low or "encrypt" in low) else "parser_error"
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="pdf",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status=parse_status,
+                    warnings=[f"pdfium_open_failed: {e}"],
+                )
+            )
+
+        try:
+            encryption = getattr(pdfium_doc, "encryption", None)
+            if encryption:
+                return ParseResult(
+                    doc=ParsedDoc(
+                        doc_id=doc_id,
+                        source_path=str(path),
+                        source_path_display=display_path(path),
+                        format="pdf",
+                        parser=self.name,
+                        fidelity=self.fidelity,
+                        parse_status="encrypted",
+                        warnings=["pdf_encrypted"],
+                    )
+                )
+        finally:
+            close = getattr(pdfium_doc, "close", None)
+            if callable(close):
+                close()
+
+        try:
             pdf = pdfplumber.open(str(path))
         except Exception as e:  # noqa: BLE001
-            raise ParserError(f"pdf_open_failed: {e}") from e
+            low = str(e).lower()
+            parse_status = "encrypted" if ("password" in low or "encrypt" in low) else "parser_error"
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="pdf",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status=parse_status,
+                    warnings=[f"pdf_open_failed: {e}"],
+                )
+            )
 
         with pdf:
             if pdf.metadata:

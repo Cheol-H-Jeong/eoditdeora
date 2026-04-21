@@ -123,7 +123,8 @@ def test_missing_file_yields_skipped_status(tmp_path: Path, stores):
         change=ChangeKind.CREATED,
     )
     result = index_file(cf, meta=meta, fts=fts, vectors=vec)
-    assert result["status"] == "skipped_missing"
+    assert result["status"] == "skipped"
+    assert result.get("reason") == "file_missing"
     assert meta.count_documents() == 0
 
 

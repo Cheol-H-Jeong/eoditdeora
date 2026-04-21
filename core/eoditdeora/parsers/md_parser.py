@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from eoditdeora.parsers.base import Block, ParsedDoc, ParseResult, ParserError
+from eoditdeora.parsers.base import Block, ParsedDoc, ParseResult
 from eoditdeora.parsers.registry import register
 from eoditdeora.utils.paths_util import display_path
 
@@ -23,10 +23,48 @@ class MdParser:
         return path.suffix.lower().lstrip(".") in self.supported_extensions
 
     def parse(self, path: Path, *, doc_id: str) -> ParseResult:
+        if not path.exists():
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="md",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status="file_missing",
+                    warnings=["file_missing"],
+                )
+            )
         try:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError as e:
-            raise ParserError(f"decode_failed: {e}") from e
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="md",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status="invalid_format",
+                    warnings=[f"decode_failed: {e}"],
+                )
+            )
+
+        if not text:
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="md",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status="empty",
+                    warnings=["empty_file"],
+                )
+            )
 
         blocks: list[Block] = []
         lines = text.splitlines()

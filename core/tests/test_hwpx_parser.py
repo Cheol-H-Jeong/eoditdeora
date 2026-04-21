@@ -25,15 +25,12 @@ def test_hwpx_native_parses_minimal_doc(tmp_path: Path):
     assert res.doc.metadata.get("author") == "tester"
 
 
-def test_hwpx_corrupt_zip_raises(tmp_path: Path):
-    from eoditdeora.parsers.base import ParserError
-
+def test_hwpx_corrupt_zip_returns_invalid_format(tmp_path: Path):
     path = tmp_path / "bad.hwpx"
     path.write_bytes(b"not a zip")
-    import pytest
-
-    with pytest.raises(ParserError):
-        HwpxParser().parse(path, doc_id="sha256:" + "f" * 64)
+    res = HwpxParser().parse(path, doc_id="sha256:" + "f" * 64)
+    assert res.doc.parse_status in {"invalid_format", "parser_error"}
+    assert any("zip" in w.lower() or "bad" in w.lower() for w in res.doc.warnings)
 
 
 def test_hwpx_no_sections_warns(tmp_path: Path):

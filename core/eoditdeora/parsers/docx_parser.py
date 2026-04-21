@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import zipfile
 from pathlib import Path
 
-from eoditdeora.parsers.base import Block, ParsedDoc, ParseResult, ParserError
+from eoditdeora.parsers.base import Block, ParsedDoc, ParseResult
 from eoditdeora.parsers.registry import register
 from eoditdeora.utils.paths_util import display_path
 
@@ -18,15 +19,77 @@ class DocxParser:
         return path.suffix.lower().lstrip(".") in self.supported_extensions
 
     def parse(self, path: Path, *, doc_id: str) -> ParseResult:
+        if not path.exists():
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="docx",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status="file_missing",
+                    warnings=["file_missing"],
+                )
+            )
+        if path.stat().st_size == 0:
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="docx",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status="empty",
+                    warnings=["empty_file"],
+                )
+            )
+
         try:
             import docx  # type: ignore[import-not-found]
         except ImportError as e:
-            raise ParserError("python-docx not available") from e
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="docx",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status="parser_error",
+                    warnings=[f"python_docx_not_available: {e}"],
+                )
+            )
 
         try:
             document = docx.Document(str(path))
+        except zipfile.BadZipFile as e:
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="docx",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status="invalid_format",
+                    warnings=[f"docx_not_zip: {e}"],
+                )
+            )
         except Exception as e:  # noqa: BLE001
-            raise ParserError(f"docx_open_failed: {e}") from e
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="docx",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status="invalid_format",
+                    warnings=[f"docx_open_failed: {e}"],
+                )
+            )
 
         blocks: list[Block] = []
         for para in document.paragraphs:
