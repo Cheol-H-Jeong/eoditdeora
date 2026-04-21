@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from eoditdeora.parsers.md_parser import MdParser
+from eoditdeora.parsers.rtf_parser import RtfParser
 from eoditdeora.parsers.txt_parser import TxtParser
 
 
@@ -39,3 +40,32 @@ def test_md_parser_headings_and_frontmatter(tmp_path: Path):
     assert ("heading", 1) in kinds
     assert ("heading", 2) in kinds
     assert any(b.type == "paragraph" for b in res.doc.blocks)
+
+
+def test_rtf_parser_extracts_unicode_text_and_paragraphs(tmp_path: Path):
+    f = tmp_path / "memo.rtf"
+    f.write_text(
+        "{\\rtf1\\ansi\\ansicpg949\\deff0\\uc1 "
+        "{\\fonttbl{\\f0\\fnil Gulim;}}"
+        "\\viewkind4\\pard "
+        "\\u-14840?\\u-16208? \\u-11128?\\u-14504?\\u-16100?\\par "
+        "\\u-10612?\\u-14504?\\u-18339? 2026\\par}",
+        encoding="latin-1",
+    )
+    res = RtfParser().parse(f, doc_id="sha256:" + "e" * 64)
+    assert res.doc.format == "rtf"
+    assert res.doc.parse_status == "ok"
+    assert [b.text for b in res.doc.blocks] == ["예산 품의서", "회의록 2026"]
+
+
+def test_rtf_parser_ignores_metadata_groups_and_decodes_hex_escapes(tmp_path: Path):
+    f = tmp_path / "latin.rtf"
+    f.write_text(
+        "{\\rtf1\\ansi"
+        "{\\info{\\title Hidden Title}}"
+        "\\pard Caf\\'e9 budget\\tab draft\\par}",
+        encoding="latin-1",
+    )
+    res = RtfParser().parse(f, doc_id="sha256:" + "f" * 64)
+    assert res.doc.parse_status == "ok"
+    assert [b.text for b in res.doc.blocks] == ["Café budget\tdraft"]

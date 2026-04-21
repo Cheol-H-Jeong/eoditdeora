@@ -15,6 +15,7 @@ from eoditdeora.parsers.docx_parser import DocxParser
 from eoditdeora.parsers.hwpx_parser import HwpxParser
 from eoditdeora.parsers.md_parser import MdParser
 from eoditdeora.parsers.pdf_parser import PdfTextLayerParser
+from eoditdeora.parsers.rtf_parser import RtfParser
 from eoditdeora.parsers.txt_parser import TxtParser
 from eoditdeora.parsers.xlsx_parser import XlsxParser
 
@@ -93,6 +94,13 @@ def test_empty_markdown_returns_empty(tmp_path: Path) -> None:
     p.write_bytes(b"")
     doc = _parse(MdParser(), p)
     assert doc.parse_status == "empty"
+
+
+def test_invalid_rtf_rejected(tmp_path: Path) -> None:
+    p = tmp_path / "broken.rtf"
+    p.write_text("plain text only", encoding="utf-8")
+    doc = _parse(RtfParser(), p)
+    assert doc.parse_status == "invalid_format"
 
 
 def test_pdf_parser_swallows_library_runtime_error(

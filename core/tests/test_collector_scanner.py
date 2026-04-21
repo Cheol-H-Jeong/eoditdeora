@@ -6,12 +6,14 @@ from eoditdeora.collector.scanner import Scanner
 
 
 def test_scanner_yields_each_file(tmp_path: Path):
-    (tmp_path / "a.txt").write_text("a", encoding="utf-8")
-    (tmp_path / "sub").mkdir()
-    (tmp_path / "sub" / "b.txt").write_text("b", encoding="utf-8")
-    (tmp_path / "sub" / "c.md").write_text("c", encoding="utf-8")
+    scan_root = tmp_path / "scan"
+    scan_root.mkdir()
+    (scan_root / "a.txt").write_text("a", encoding="utf-8")
+    (scan_root / "sub").mkdir()
+    (scan_root / "sub" / "b.txt").write_text("b", encoding="utf-8")
+    (scan_root / "sub" / "c.md").write_text("c", encoding="utf-8")
 
-    results = list(Scanner(tmp_path).walk())
+    results = list(Scanner(scan_root).walk())
     names = sorted(r.path.name for r in results)
     assert names == ["a.txt", "b.txt", "c.md"]
     assert all(r.change is ChangeKind.CREATED for r in results)

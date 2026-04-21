@@ -31,6 +31,7 @@ def _try_import(modname: str) -> None:
 for _m in (
     "txt_parser",
     "md_parser",
+    "rtf_parser",
     "docx_parser",
     "xlsx_parser",
     "pptx_parser",
