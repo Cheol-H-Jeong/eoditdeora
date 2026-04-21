@@ -247,10 +247,21 @@ export type Settings = {
     rerank: Endpoint;
     llm_context_tokens: number;
   };
-  index: { roots: string[]; max_file_bytes: number };
+  index: {
+    roots: string[];
+    max_file_bytes: number;
+    extensions: string[];
+    ignore_patterns: string[];
+    incremental_interval_sec: number;
+    batch_understand_hour: number;
+  };
   search: { strict_provenance: boolean; bm25_top_k: number; dense_top_k: number; rerank_top_k: number };
 };
 
 export async function getSettings(): Promise<Settings> {
   return rpc<Settings>("settings.get");
+}
+
+export async function updateSettings(settings: Settings): Promise<Settings> {
+  return rpc<Settings>("settings.update", settings as unknown as Record<string, unknown>);
 }

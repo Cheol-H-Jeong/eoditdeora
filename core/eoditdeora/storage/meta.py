@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from eoditdeora.config.paths import get_paths
+from eoditdeora.storage.schema_version import CURRENT_SCHEMA_VERSION, ensure_version
 from eoditdeora.utils.logging import get_logger
 
 log = get_logger(__name__)
@@ -129,11 +130,30 @@ class MetaStore:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        ensure_version(
+            self._path.parent,
+            "meta",
+            CURRENT_SCHEMA_VERSION,
+            self._rebuild_schema,
+        )
         self._init_schema()
 
     def _init_schema(self) -> None:
         with self._conn:
             self._conn.executescript(_SCHEMA)
+
+    def _rebuild_schema(self) -> None:
+        with self._conn:
+            self._conn.executescript(
+                """
+                DROP TABLE IF EXISTS relations;
+                DROP TABLE IF EXISTS entities;
+                DROP TABLE IF EXISTS chunks;
+                DROP TABLE IF EXISTS jobs;
+                DROP TABLE IF EXISTS documents;
+                """
+            )
+        self._init_schema()
 
     @property
     def path(self) -> Path:

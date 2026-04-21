@@ -33,6 +33,10 @@ target/
 $RECYCLE.BIN/
 .Trash*/
 .eoditdeora.local/
+fast_index.db
+fast_index.db-*
+schema.sqlite3
+schema.sqlite3-*
 """
 
 

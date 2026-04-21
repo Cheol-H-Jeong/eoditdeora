@@ -18,6 +18,7 @@
     indexRescan,
     indexStatus,
     removeRoot,
+    updateSettings,
     type AutoConnectResult,
     type AutostartStatus,
     type DocPathCandidate,
@@ -60,6 +61,80 @@
   let docCandidates = $state<DocPathCandidate[]>([]);
   let fastStats = $state<FastStats | null>(null);
   let rescanMsg = $state<string>("");
+
+  // Extension picker state.
+  const DEFAULT_EXTS: readonly string[] = [
+    ".hwp", ".hwpx",
+    ".pdf",
+    ".doc", ".docx",
+    ".ppt", ".pptx",
+    ".xls", ".xlsx",
+    ".txt", ".md", ".markdown",
+    ".rtf", ".odt", ".ods", ".odp",
+  ];
+  let selectedExtensions = $state<string[]>([]);
+  let newExt = $state("");
+  let extSaveMsg = $state<string>("");
+
+  function extOptions(): string[] {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const e of DEFAULT_EXTS) {
+      if (!seen.has(e)) { seen.add(e); out.push(e); }
+    }
+    for (const e of selectedExtensions) {
+      if (!seen.has(e)) { seen.add(e); out.push(e); }
+    }
+    for (const b of fastStats?.by_ext ?? []) {
+      const key = b.ext || "(none)";
+      if (!seen.has(key) && key !== "(none)") { seen.add(key); out.push(key); }
+    }
+    return out.sort();
+  }
+
+  function extCountFor(ext: string): number {
+    return fastStats?.by_ext.find((b) => b.ext === ext)?.count ?? 0;
+  }
+
+  async function saveExtensions(next: string[]) {
+    busy = { ...busy, extsave: true };
+    extSaveMsg = "저장 중...";
+    try {
+      const s = await getSettings();
+      s.index.extensions = Array.from(new Set(next)).sort();
+      await updateSettings(s);
+      selectedExtensions = s.index.extensions;
+      extSaveMsg = `${selectedExtensions.length}개 확장자 저장됨. 새 확장자는 '재탐색'으로 반영하세요.`;
+    } catch (e) {
+      extSaveMsg = String(e);
+    } finally {
+      busy = { ...busy, extsave: false };
+    }
+  }
+
+  async function onToggleExt(ext: string, on: boolean) {
+    const next = on
+      ? [...selectedExtensions, ext]
+      : selectedExtensions.filter((e) => e !== ext);
+    await saveExtensions(next);
+  }
+
+  async function onAddExt() {
+    let e = newExt.trim().toLowerCase();
+    if (!e) return;
+    if (!e.startsWith(".")) e = "." + e;
+    if (selectedExtensions.includes(e)) {
+      extSaveMsg = "이미 목록에 있습니다.";
+      newExt = "";
+      return;
+    }
+    await saveExtensions([...selectedExtensions, e]);
+    newExt = "";
+  }
+
+  async function onResetExts() {
+    await saveExtensions([...DEFAULT_EXTS]);
+  }
 
   // Periodic refresh must NOT touch `endpoints` — the user is often
   // mid-edit on the base URL / API key inputs, and pulling the stored
@@ -131,6 +206,7 @@
         embed: s.model.embed,
         rerank: s.model.rerank,
       };
+      selectedExtensions = s.index.extensions ?? [];
     } catch (e) {
       console.warn(e);
     }
@@ -374,6 +450,43 @@
   </section>
 
   <section>
+    <h2>색인 대상 확장자</h2>
+    <p class="hint">
+      체크된 확장자만 실시간 색인합니다. 변경 시 즉시 저장되며, 추가한
+      확장자는 재탐색 시 반영됩니다.
+    </p>
+    <div class="ext-grid">
+      {#each extOptions() as ext}
+        <label class="ext-check">
+          <input
+            type="checkbox"
+            checked={selectedExtensions.includes(ext)}
+            onchange={(e) => onToggleExt(ext, (e.target as HTMLInputElement).checked)}
+            disabled={busy.extsave}
+          />
+          <span class="ext-label">{ext}</span>
+          {#if extCountFor(ext) > 0}
+            <span class="ext-count">{extCountFor(ext).toLocaleString()}</span>
+          {/if}
+        </label>
+      {/each}
+    </div>
+    <div class="ext-addrow">
+      <input
+        type="text"
+        bind:value={newExt}
+        placeholder=".epub"
+        onkeydown={(e) => e.key === 'Enter' && onAddExt()}
+      />
+      <button onclick={onAddExt} disabled={busy.extsave || !newExt.trim()}>확장자 추가</button>
+      <button class="cancel" onclick={onResetExts} disabled={busy.extsave}>기본값 복원</button>
+    </div>
+    {#if extSaveMsg}
+      <p class="hint small">{extSaveMsg}</p>
+    {/if}
+  </section>
+
+  <section>
     <h2>자동 시작</h2>
     {#if autostart}
       <label class="toggle">
@@ -601,6 +714,59 @@
   button:disabled { opacity: 0.4; cursor: not-allowed; }
   button.cancel { background: #2a2f3a; color: #a0a6b0; }
   .stat { margin: 6px 0 0; font-size: 11px; color: #8a94a3; }
+  .ext-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 4px 8px;
+    margin-bottom: 10px;
+  }
+  .ext-check {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    color: #c7cbd3;
+  }
+  .ext-check:hover { background: #181c26; }
+  .ext-check input { accent-color: #4b7bff; }
+  .ext-label { font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .ext-count {
+    margin-left: auto;
+    font-size: 10px;
+    color: #6b7280;
+  }
+  .ext-addrow {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+  }
+  .ext-addrow input {
+    flex: 1;
+    background: #12151c;
+    border: 1px solid #2a2f3a;
+    color: #e8e8ea;
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+  .ext-addrow button {
+    background: #4b7bff;
+    border: 0;
+    color: white;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .ext-addrow button.cancel {
+    background: transparent;
+    border: 1px solid #2a2f3a;
+    color: #a0a6b0;
+  }
+  .ext-addrow button:disabled { opacity: 0.5; cursor: not-allowed; }
   .toggle { display: flex; gap: 8px; align-items: center; font-size: 12px; cursor: pointer; }
   .discover-row {
     display: flex; align-items: center; gap: 8px; margin-bottom: 8px;

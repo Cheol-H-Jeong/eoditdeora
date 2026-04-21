@@ -9,11 +9,13 @@ inadequate.
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
 from typing import Any
 
 import tantivy  # type: ignore[import-not-found]
 
 from eoditdeora.config.paths import get_paths
+from eoditdeora.storage.schema_version import CURRENT_SCHEMA_VERSION, ensure_version
 from eoditdeora.storage.tokenize import kiwi_tokenize, kiwi_tokenize_for_query
 from eoditdeora.utils.logging import get_logger
 
@@ -43,6 +45,12 @@ class FtsStore:
         self._dir.mkdir(parents=True, exist_ok=True)
         self._schema = _schema()
         self._index: tantivy.Index | None = None
+        ensure_version(
+            self._dir.parent,
+            "fts",
+            CURRENT_SCHEMA_VERSION,
+            self._rebuild_index,
+        )
 
     def _open(self) -> tantivy.Index:
         if self._index is not None:
@@ -52,6 +60,12 @@ class FtsStore:
         except Exception:
             self._index = tantivy.Index(self._schema, path=str(self._dir))
         return self._index
+
+    def _rebuild_index(self) -> None:
+        self._index = None
+        shutil.rmtree(self._dir, ignore_errors=True)
+        self._dir.mkdir(parents=True, exist_ok=True)
+        tantivy.Index(self._schema, path=str(self._dir))
 
     def upsert(self, records: list[dict[str, Any]]) -> None:
         if not records:

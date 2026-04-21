@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from eoditdeora.config.paths import get_paths
+from eoditdeora.storage.schema_version import CURRENT_SCHEMA_VERSION, ensure_version
 from eoditdeora.utils.logging import get_logger
 
 log = get_logger(__name__)
@@ -143,7 +144,24 @@ class FastIndex:
         )
         self._conn.row_factory = sqlite3.Row
         self._conn.execute(f"PRAGMA busy_timeout = {self._BUSY_TIMEOUT_MS}")
+        ensure_version(
+            self._path.parent,
+            "fast_index",
+            CURRENT_SCHEMA_VERSION,
+            self._rebuild_schema,
+        )
         with self._lock:
+            self._conn.executescript(_SCHEMA)
+
+    def _rebuild_schema(self) -> None:
+        with self._lock:
+            with self._conn:
+                self._conn.executescript(
+                    """
+                    DROP TABLE IF EXISTS files_fts;
+                    DROP TABLE IF EXISTS files;
+                    """
+                )
             self._conn.executescript(_SCHEMA)
 
     # ------------------------------------------------------------------

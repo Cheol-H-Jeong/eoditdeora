@@ -16,6 +16,7 @@ from typing import Any
 import pyarrow as pa  # type: ignore[import-not-found]
 
 from eoditdeora.config.paths import get_paths
+from eoditdeora.storage.schema_version import CURRENT_SCHEMA_VERSION, ensure_version
 from eoditdeora.utils.logging import get_logger
 
 log = get_logger(__name__)
@@ -75,6 +76,12 @@ class VectorStore:
         self._table_name = table_name
         self._db = None  # lazily opened
         self._table = None
+        ensure_version(
+            self._dir.parent,
+            "vectors",
+            CURRENT_SCHEMA_VERSION,
+            self._rebuild_table,
+        )
 
     def _open(self) -> None:
         if self._db is not None:
@@ -96,6 +103,17 @@ class VectorStore:
                 schema=_schema(),
             )
             self._table = self._db.create_table(self._table_name, data=empty)
+
+    def _rebuild_table(self) -> None:
+        self._open()
+        assert self._db is not None
+        self._table = None
+        try:
+            self._db.drop_table(self._table_name)
+        except Exception as e:  # noqa: BLE001
+            log.debug("lancedb_drop_table_skipped", error=str(e), table=self._table_name)
+        self._db = None
+        self._open()
 
     def upsert(self, records: list[dict[str, Any]]) -> None:
         if not records:
