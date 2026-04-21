@@ -172,6 +172,9 @@ def _walk_text_blocks(elem: ET.Element, blocks: list[Block], *, in_list_item: bo
             table_text, rows, cols = _table_to_text(elem)
             if table_text:
                 blocks.append(Block(type="table", text=table_text, meta={"rows": rows, "cols": cols}))
+            # Table content is already captured as one block. Walking into
+            # child paragraphs would duplicate the same cell text.
+            return
 
     for child in elem:
         _walk_text_blocks(child, blocks, in_list_item=next_in_list_item)

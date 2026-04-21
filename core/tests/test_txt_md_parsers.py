@@ -112,6 +112,40 @@ def test_odt_parser_extracts_headings_paragraphs_and_metadata(tmp_path: Path):
     assert res.doc.metadata["author"] == "Cheol"
 
 
+def test_odt_parser_does_not_duplicate_table_cells_as_paragraphs(tmp_path: Path):
+    f = tmp_path / "table.odt"
+    _write_odf_zip(
+        f,
+        content_xml=(
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<office:document-content '
+            'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+            'xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" '
+            'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">'
+            "<office:body><office:text>"
+            "<text:p>본문 요약</text:p>"
+            "<table:table>"
+            "<table:table-row>"
+            "<table:table-cell><text:p>항목</text:p></table:table-cell>"
+            "<table:table-cell><text:p>금액</text:p></table:table-cell>"
+            "</table:table-row>"
+            "<table:table-row>"
+            "<table:table-cell><text:p>운영비</text:p></table:table-cell>"
+            "<table:table-cell><text:p>120000</text:p></table:table-cell>"
+            "</table:table-row>"
+            "</table:table>"
+            "</office:text></office:body>"
+            "</office:document-content>"
+        ),
+    )
+    res = OpenDocumentParser().parse(f, doc_id="sha256:" + "4" * 64)
+    assert res.doc.parse_status == "ok"
+    assert [(b.type, b.text) for b in res.doc.blocks] == [
+        ("paragraph", "본문 요약"),
+        ("table", "항목\t금액\n운영비\t120000"),
+    ]
+
+
 def test_ods_parser_extracts_sheet_rows(tmp_path: Path):
     f = tmp_path / "budget.ods"
     _write_odf_zip(
