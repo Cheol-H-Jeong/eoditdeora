@@ -124,6 +124,15 @@ def _root_like_pattern(root: Path | str) -> str:
     return p.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 
+def _query_term_groups(query: str) -> list[list[str]]:
+    groups: list[list[str]] = []
+    for raw_term in query.split():
+        expanded = expand_search_terms([raw_term])
+        if expanded:
+            groups.append(expanded)
+    return groups
+
+
 class FastIndex:
     """Thread-safe file-name index.
 
@@ -296,28 +305,32 @@ class FastIndex:
         if not q:
             return []
         safe_limit = max(0, int(limit))
-        terms = expand_search_terms([q])
+        term_groups = _query_term_groups(q)
+        if not term_groups:
+            return []
 
-        use_like = len(q) < 3
+        # Any sub-3-char term still needs the LIKE fallback because the
+        # trigram tokenizer cannot index or query it reliably.
+        use_like = any(len(term) < 3 for group in term_groups for term in group)
         params: list[Any] = []
         if use_like:
-            sql = (
-                "SELECT path, name, parent, size, mtime, ext "
-                "FROM files WHERE ("
-            )
-            like_clauses: list[str] = []
-            for term in terms:
-                like = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-                like_pattern = f"%{like}%"
-                like_clauses.append(
-                    "("
-                    "name LIKE ? ESCAPE '\\' "
-                    "OR parent LIKE ? ESCAPE '\\' "
-                    "OR path LIKE ? ESCAPE '\\'"
-                    ")"
-                )
-                params.extend([like_pattern, like_pattern, like_pattern])
-            sql += " OR ".join(like_clauses) + ")"
+            sql = "SELECT path, name, parent, size, mtime, ext FROM files WHERE "
+            group_clauses: list[str] = []
+            for group in term_groups:
+                alternates: list[str] = []
+                for term in group:
+                    like = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                    like_pattern = f"%{like}%"
+                    alternates.append(
+                        "("
+                        "name LIKE ? ESCAPE '\\' "
+                        "OR parent LIKE ? ESCAPE '\\' "
+                        "OR path LIKE ? ESCAPE '\\'"
+                        ")"
+                    )
+                    params.extend([like_pattern, like_pattern, like_pattern])
+                group_clauses.append("(" + " OR ".join(alternates) + ")")
+            sql += " AND ".join(group_clauses)
             if exts:
                 placeholders = ",".join("?" for _ in exts)
                 sql += f" AND ext IN ({placeholders})"
@@ -325,11 +338,17 @@ class FastIndex:
             sql += " ORDER BY mtime DESC LIMIT ?"
             params.append(safe_limit)
         else:
-            # `"q"` is the phrase-quoted form; without quoting the
-            # tokenizer would treat hyphens / dots as punctuation
-            # boundaries, dropping matches like `2025-report` when the
-            # user types `report`.
-            fts_q = " OR ".join('"' + term.replace('"', '""') + '"' for term in terms)
+            # Quote each term so punctuation inside filenames stays
+            # searchable; whitespace between raw terms means every term
+            # group must match, while per-term synonyms stay OR'd.
+            group_queries: list[str] = []
+            for group in term_groups:
+                quoted = ['"' + term.replace('"', '""') + '"' for term in group]
+                if len(quoted) == 1:
+                    group_queries.append(quoted[0])
+                else:
+                    group_queries.append("(" + " OR ".join(quoted) + ")")
+            fts_q = " AND ".join(group_queries)
             params.append(fts_q)
             sql = (
                 "SELECT f.path, f.name, f.parent, f.size, f.mtime, f.ext "

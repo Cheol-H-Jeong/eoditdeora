@@ -183,6 +183,27 @@ async def test_files_search_expands_office_synonyms():
 
 
 @pytest.mark.asyncio
+async def test_files_search_requires_all_whitespace_terms():
+    idx = FastIndex()
+    try:
+        idx.upsert_many([
+            ("/x/2026_예산안_회의록.hwpx", 1, 100.0),
+            ("/x/회의록_예산안.hwpx", 1, 99.0),
+            ("/x/예산안_초안.hwpx", 1, 98.0),
+        ])
+    finally:
+        idx.close()
+
+    server = RpcServer()
+    resp = await _call(server, "files.search", {"query": "예산안 회의록"})
+
+    assert [row["path"] for row in resp["result"]["results"]] == [
+        "/x/2026_예산안_회의록.hwpx",
+        "/x/회의록_예산안.hwpx",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_forget_removes_records():
     server = RpcServer()
     resp = await _call(
