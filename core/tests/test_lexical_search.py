@@ -139,6 +139,22 @@ def test_lexical_search_degrades_when_fts_open_fails(
     assert lexical_mod.lexical_search("x") == []
 
 
+@pytest.mark.asyncio
+async def test_search_mode_surfaces_real_fts_search_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class BrokenFts:
+        def search(self, *_a: object, **_k: object) -> list[dict[str, Any]]:
+            raise RuntimeError("tantivy index corrupt")
+
+    monkeypatch.setattr(lexical_mod, "FtsStore", BrokenFts)
+
+    out = await service_mod.search("예산", mode="search")
+    assert out["results"] == []
+    assert out["warning"] == "search_backend_failed"
+    assert "tantivy index corrupt" in out["detail"]
+
+
 def test_lexical_search_empty_query_short_circuits() -> None:
     assert lexical_mod.lexical_search("") == []
     assert lexical_mod.lexical_search("   ") == []

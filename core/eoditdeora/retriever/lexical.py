@@ -44,8 +44,8 @@ def lexical_search(query: str, *, top_k: int = 20) -> list[dict[str, Any]]:
         try:
             rows = fts.search(query, top_k=top_k)
         except Exception as e:  # noqa: BLE001
-            log.info("lexical_fts_search_failed", error=str(e))
-            return []
+            log.exception("lexical_fts_search_failed", error=str(e))
+            raise
         if not rows:
             return []
 
