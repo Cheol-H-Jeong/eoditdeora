@@ -21,6 +21,7 @@ from typing import Any
 from eoditdeora.retriever.hybrid import hybrid_search
 from eoditdeora.retriever.lexical import lexical_search
 from eoditdeora.retriever.rag import answer_strict
+from eoditdeora.storage.history import HistoryStore
 from eoditdeora.utils.logging import get_logger
 
 log = get_logger(__name__)
@@ -35,6 +36,14 @@ async def search(query: str, top_k: int = 10, mode: str = "search") -> dict[str,
     the actual problem without the app window disappearing.
     """
     use_hybrid = mode == "ask"
+    try:
+        history = HistoryStore()
+        try:
+            history.record_query(query)
+        finally:
+            history.close()
+    except Exception as e:  # noqa: BLE001
+        log.warning("history_record_query_failed", error=str(e))
     try:
         hits = (
             hybrid_search(query, top_k=top_k)

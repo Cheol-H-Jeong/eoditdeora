@@ -32,6 +32,25 @@ async def test_search_mode_returns_results(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.mark.asyncio
+async def test_search_records_query(monkeypatch: pytest.MonkeyPatch):
+    calls: list[str] = []
+
+    class FakeHistoryStore:
+        def record_query(self, query: str) -> None:
+            calls.append(query)
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(service_mod, "HistoryStore", FakeHistoryStore)
+    monkeypatch.setattr(service_mod, "lexical_search", lambda *_a, **_k: [])
+
+    await service_mod.search("최근 검색")
+
+    assert calls == ["최근 검색"]
+
+
+@pytest.mark.asyncio
 async def test_ask_mode_includes_answer(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         service_mod,

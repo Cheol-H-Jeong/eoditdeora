@@ -45,6 +45,11 @@ jobs:
             olefile xlrd extract-msg py7zr rarfile Pillow pyhwp \
             kiwipiepy lancedb pyarrow tantivy
 
+      - name: Check telemetry egress guard
+        env:
+          PYTHONPATH: core
+        run: python scripts/check_egress.py
+
       - name: Run pytest
         env:
           PYTHONPATH: core

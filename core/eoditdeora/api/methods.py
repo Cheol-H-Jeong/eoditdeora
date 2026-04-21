@@ -167,7 +167,70 @@ async def _open_file(params: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "error": "launcher_missing", "detail": str(e)}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": "spawn_failed", "detail": str(e)}
+    try:
+        from eoditdeora.storage.history import HistoryStore
+
+        history = HistoryStore()
+        try:
+            history.record_open(str(target))
+        finally:
+            history.close()
+    except Exception:
+        pass
     return {"ok": True, "path": str(target)}
+
+
+async def _history_record_query(params: dict[str, Any]) -> dict[str, Any]:
+    from eoditdeora.storage.history import HistoryStore
+
+    history = HistoryStore()
+    try:
+        history.record_query(str(params.get("query", "")))
+        return {"ok": True}
+    finally:
+        history.close()
+
+
+async def _history_record_open(params: dict[str, Any]) -> dict[str, Any]:
+    from eoditdeora.storage.history import HistoryStore
+
+    history = HistoryStore()
+    try:
+        history.record_open(str(params.get("path", "")))
+        return {"ok": True}
+    finally:
+        history.close()
+
+
+async def _history_top(params: dict[str, Any]) -> dict[str, Any]:
+    from eoditdeora.storage.history import HistoryStore
+
+    kinds_raw = params.get("kinds")
+    kinds = {"queries", "opens"}
+    if isinstance(kinds_raw, list) and kinds_raw:
+        kinds = {str(kind) for kind in kinds_raw}
+
+    history = HistoryStore()
+    try:
+        result: dict[str, Any] = {}
+        if "queries" in kinds:
+            result["queries"] = history.top_queries(int(params.get("limit_query", 5)))
+        if "opens" in kinds:
+            result["opens"] = history.top_opens(int(params.get("limit_open", 10)))
+        return result
+    finally:
+        history.close()
+
+
+async def _history_clear(_: dict[str, Any]) -> dict[str, Any]:
+    from eoditdeora.storage.history import HistoryStore
+
+    history = HistoryStore()
+    try:
+        history.clear()
+        return {"ok": True}
+    finally:
+        history.close()
 
 
 async def _indexer_status(_: dict[str, Any]) -> dict[str, Any]:
@@ -377,4 +440,8 @@ def register_all(server: RpcServer) -> None:
     server.register("endpoints.presets", _endpoints_presets)
     server.register("first_run.bootstrap", _first_run_bootstrap)
     server.register("forget", _forget)
+    server.register("history.record_query", _history_record_query)
+    server.register("history.record_open", _history_record_open)
+    server.register("history.top", _history_top)
+    server.register("history.clear", _history_clear)
     server.register("open_file", _open_file)

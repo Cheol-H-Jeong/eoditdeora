@@ -82,3 +82,31 @@ async def test_invalid_params_returns_error_code():
     msg = {"jsonrpc": "2.0", "id": 42, "method": "search", "params": "not an object"}
     resp = await server.handle_single(msg)
     assert resp["error"]["code"] == -32602
+
+
+@pytest.mark.asyncio
+async def test_history_rpc_roundtrip():
+    server = RpcServer()
+    await _call(server, "history.record_query", {"query": "alpha"})
+    await _call(server, "history.record_query", {"query": "beta"})
+    await _call(server, "history.record_open", {"path": "/tmp/a.txt"})
+
+    resp = await _call(
+        server,
+        "history.top",
+        {"kinds": ["queries", "opens"], "limit_query": 5, "limit_open": 10},
+    )
+
+    assert [row["query"] for row in resp["result"]["queries"]] == ["beta", "alpha"]
+    assert resp["result"]["opens"][0]["path"] == "/tmp/a.txt"
+
+
+@pytest.mark.asyncio
+async def test_history_clear_rpc():
+    server = RpcServer()
+    await _call(server, "history.record_query", {"query": "alpha"})
+    await _call(server, "history.clear")
+
+    resp = await _call(server, "history.top", {"kinds": ["queries"]})
+
+    assert resp["result"]["queries"] == []
