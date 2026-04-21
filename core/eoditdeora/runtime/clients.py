@@ -13,6 +13,7 @@ a role is not configured, so callers short-circuit gracefully.
 from __future__ import annotations
 
 import json
+import math
 import time
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -180,6 +181,36 @@ def _raise_bad_response(url: str, role: str, detail: str) -> None:
         "추론 서버 응답 JSON 형식이 올바르지 않습니다",
         data,
     )
+
+
+def _coerce_embedding_vector(url: str, idx: int, embedding: Any) -> list[float]:
+    if not isinstance(embedding, list):
+        _raise_bad_response(url, "embed", f"data[{idx}].embedding is missing")
+
+    vector: list[float] = []
+    for dim, raw_value in enumerate(embedding):
+        if isinstance(raw_value, bool):
+            _raise_bad_response(
+                url,
+                "embed",
+                f"data[{idx}].embedding[{dim}] is not a finite number",
+            )
+        try:
+            value = float(raw_value)
+        except (TypeError, ValueError):
+            _raise_bad_response(
+                url,
+                "embed",
+                f"data[{idx}].embedding[{dim}] is not a finite number",
+            )
+        if not math.isfinite(value):
+            _raise_bad_response(
+                url,
+                "embed",
+                f"data[{idx}].embedding[{dim}] is not a finite number",
+            )
+        vector.append(value)
+    return vector
 
 
 def _bad_request_message(role: str, detail: str) -> str:
@@ -573,9 +604,7 @@ class EmbedClient(_EndpointClient):
             if not isinstance(item, dict):
                 _raise_bad_response(url, "embed", f"data[{idx}] is not an object")
             embedding = item.get("embedding")
-            if not isinstance(embedding, list):
-                _raise_bad_response(url, "embed", f"data[{idx}].embedding is missing")
-            vectors.append(embedding)
+            vectors.append(_coerce_embedding_vector(url, idx, embedding))
         return vectors
 
 

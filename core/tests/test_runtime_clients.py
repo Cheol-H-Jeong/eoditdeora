@@ -107,6 +107,34 @@ def test_embed_client_malformed_json_raises_bad_response():
     assert ei.value.data.get("detail") == "data[0].embedding is missing"
 
 
+def test_embed_client_rejects_non_numeric_embedding_values():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/embeddings"
+        return httpx.Response(200, json={"data": [{"embedding": [0.1, "bad", 0.3]}]})
+
+    client = EmbedClient("127.0.0.1", 0)
+    client._client = _mock_client(handler)  # type: ignore[attr-defined]
+    with pytest.raises(RpcError) as ei:
+        client.embed(["가"])
+    assert ei.value.code == ERR_UPSTREAM_BAD_RESPONSE
+    assert ei.value.data is not None
+    assert ei.value.data.get("detail") == "data[0].embedding[1] is not a finite number"
+
+
+def test_embed_client_rejects_non_finite_embedding_values():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/embeddings"
+        return httpx.Response(200, json={"data": [{"embedding": [0.1, "NaN", 0.3]}]})
+
+    client = EmbedClient("127.0.0.1", 0)
+    client._client = _mock_client(handler)  # type: ignore[attr-defined]
+    with pytest.raises(RpcError) as ei:
+        client.embed(["가"])
+    assert ei.value.code == ERR_UPSTREAM_BAD_RESPONSE
+    assert ei.value.data is not None
+    assert ei.value.data.get("detail") == "data[0].embedding[1] is not a finite number"
+
+
 def test_embed_empty_input_returns_empty():
     client = EmbedClient("127.0.0.1", 0)
     assert client.embed([]) == []
