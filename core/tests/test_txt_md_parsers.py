@@ -101,6 +101,20 @@ def test_rtf_parser_skips_hex_fallback_after_unicode_escape(tmp_path: Path):
     assert [b.text for b in res.doc.blocks] == ["한글"]
 
 
+def test_rtf_parser_skips_binary_payload_inside_pict_group(tmp_path: Path):
+    f = tmp_path / "embedded-image.rtf"
+    f.write_text(
+        "{\\rtf1\\ansi\\deff0 "
+        "\\pard alpha\\par"
+        "{\\pict\\pngblip\\bin6 \\\\}}xyz}"
+        "\\par omega\\par}",
+        encoding="latin-1",
+    )
+    res = RtfParser().parse(f, doc_id="sha256:" + "8" * 64)
+    assert res.doc.parse_status == "ok"
+    assert [b.text for b in res.doc.blocks] == ["alpha", "omega"]
+
+
 def test_odt_parser_extracts_headings_paragraphs_and_metadata(tmp_path: Path):
     f = tmp_path / "memo.odt"
     _write_odf_zip(

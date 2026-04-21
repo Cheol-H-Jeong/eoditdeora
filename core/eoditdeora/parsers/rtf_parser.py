@@ -228,6 +228,12 @@ def _extract_rtf_text(raw: bytes) -> str | None:
                 i += 1
             i = _skip_unicode_fallback(text, i, unicode_skip)
             continue
+        elif word == "bin" and param is not None:
+            _flush_ansi_bytes()
+            if i < len(text) and text[i] == " ":
+                i += 1
+            i = min(len(text), i + max(param, 0))
+            continue
         elif word == "par":
             _flush_ansi_bytes()
             if not ignorable:
