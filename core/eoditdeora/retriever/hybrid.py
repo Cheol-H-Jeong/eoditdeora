@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from eoditdeora.config import load_settings
+from eoditdeora.retriever.snippet import make_snippet
 from eoditdeora.runtime.clients import EmbedClient, RerankClient, get_embed_client, get_rerank_client
 from eoditdeora.storage.fts import FtsStore
 from eoditdeora.storage.meta import MetaStore
@@ -146,11 +147,13 @@ def hybrid_search(query: str, *, top_k: int = 10) -> list[dict[str, Any]]:
                     row = cur.fetchone()
                 except Exception as e:  # noqa: BLE001
                     log.debug("meta_lookup_failed", doc_id=h.doc_id, error=str(e))
+            plain, marked = make_snippet(h.text, query)
             results.append(
                 {
                     "chunk_id": h.chunk_id,
                     "doc_id": h.doc_id,
-                    "snippet": h.text[:400],
+                    "snippet": plain,
+                    "snippet_html": marked,
                     "score": h.rerank_score if h.rerank_score is not None else h.score,
                     "fusion_score": h.score,
                     "source_path": row["source_path"] if row else "",

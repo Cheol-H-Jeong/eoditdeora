@@ -173,7 +173,15 @@ async def _open_file(params: dict[str, Any]) -> dict[str, Any]:
 async def _indexer_status(_: dict[str, Any]) -> dict[str, Any]:
     from eoditdeora.indexer.daemon import get_daemon
 
-    return {"running": True, "stats": get_daemon().stats()}
+    d = get_daemon()
+    progress = d.progress()
+    return {
+        "running": progress.get("running", True),
+        "stats": d.stats(),
+        "queue_size": progress.get("queue_size", 0),
+        "last_file": progress.get("last_file"),
+        "last_event_ts": progress.get("last_event_ts", 0.0),
+    }
 
 
 async def _autostart_enable(_: dict[str, Any]) -> dict[str, Any]:

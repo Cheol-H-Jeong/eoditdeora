@@ -22,8 +22,9 @@ export type SearchResult = {
   chunk_id: string;
   doc_id: string;
   snippet: string;
+  snippet_html?: string;
   score: number;
-  fusion_score: number;
+  fusion_score: number | null;
   source_path: string;
   source_path_display: string;
   format: string;
@@ -131,6 +132,20 @@ export async function indexStatus(): Promise<IndexStatus> {
 
 export async function ping(): Promise<{ ok: boolean; version: string }> {
   return rpc("ping");
+}
+
+// ---- indexer progress ----------------------------------------------------
+
+export type IndexerProgress = {
+  running: boolean;
+  stats: { indexed: number; skipped: number; deleted: number; errors: number };
+  queue_size: number;
+  last_file: string | null;
+  last_event_ts: number;
+};
+
+export async function indexerStatus(): Promise<IndexerProgress> {
+  return rpc<IndexerProgress>("indexer.status");
 }
 
 export type AutostartStatus = {

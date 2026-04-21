@@ -19,7 +19,7 @@ on:
       tag:
         description: "Existing tag to (re-)attach artifacts to"
         required: true
-        default: "v0.1.2"
+        default: "v0.1.3"
 
 permissions:
   contents: write

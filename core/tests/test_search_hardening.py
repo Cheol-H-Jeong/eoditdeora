@@ -25,20 +25,20 @@ class _Boom:
 @pytest.mark.asyncio
 async def test_search_returns_structured_error_on_backend_crash(monkeypatch: pytest.MonkeyPatch):
     def blow_up(*_a: Any, **_k: Any) -> list[dict[str, Any]]:
-        raise RuntimeError("lancedb went sideways")
+        raise RuntimeError("tantivy went sideways")
 
-    # service imports hybrid_search by name, so patch the symbol the
-    # service module actually looked up — not the origin module.
-    monkeypatch.setattr(service_mod, "hybrid_search", blow_up)
+    # mode='search' takes the lexical path — patch the symbol the
+    # service module actually looked up (not the origin module).
+    monkeypatch.setattr(service_mod, "lexical_search", blow_up)
     payload = await service_mod.search("query", top_k=5, mode="search")
     assert payload["results"] == []
     assert payload["warning"] == "search_backend_failed"
-    assert "lancedb went sideways" in payload["detail"]
+    assert "tantivy went sideways" in payload["detail"]
 
 
 @pytest.mark.asyncio
 async def test_search_flags_empty_results(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(service_mod, "hybrid_search", lambda *a, **k: [])
+    monkeypatch.setattr(service_mod, "lexical_search", lambda *a, **k: [])
     payload = await service_mod.search("query", top_k=5, mode="search")
     assert payload["results"] == []
     assert payload["warning"] == "no_results"

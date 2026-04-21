@@ -36,6 +36,9 @@ log = get_logger(__name__)
 # Order matters: earlier entries are preferred in the UI list.
 WELL_KNOWN_CANDIDATES: tuple[tuple[str, str], ...] = (
     ("http://127.0.0.1:8080", "openai"),   # llama.cpp default
+    ("http://127.0.0.1:8081", "openai"),   # llama-server role split: LLM
+    ("http://127.0.0.1:8082", "openai"),   # llama-server role split: embed
+    ("http://127.0.0.1:8083", "openai"),   # llama-server role split: rerank
     ("http://127.0.0.1:8000/v1", "openai"),  # vLLM
     ("http://127.0.0.1:1234/v1", "openai"),  # LM Studio
     ("http://127.0.0.1:11434/v1", "openai"),  # Ollama (OpenAI-compat)

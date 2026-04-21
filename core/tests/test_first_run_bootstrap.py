@@ -8,7 +8,20 @@ import pytest
 
 from eoditdeora.api.methods import _first_run_bootstrap
 from eoditdeora.config import load_settings
+from eoditdeora.runtime import auto_connect as auto_connect_mod
 from eoditdeora.runtime import autostart as autostart_mod
+
+
+@pytest.fixture(autouse=True)
+def _stub_auto_connect(monkeypatch: pytest.MonkeyPatch):
+    """Isolate bootstrap tests from whatever LLM servers happen to be
+    running on this machine. The idempotency/skips invariants are about
+    the bootstrap itself, not about host-port discovery noise."""
+    monkeypatch.setattr(
+        auto_connect_mod,
+        "auto_connect",
+        lambda force=False: {"probed": 0, "actions": [], "roles": {}},
+    )
 
 
 @pytest.mark.asyncio

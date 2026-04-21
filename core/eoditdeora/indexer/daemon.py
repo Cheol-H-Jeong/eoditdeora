@@ -23,6 +23,7 @@ import queue
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 from eoditdeora.collector.ignore import IgnoreMatcher
 from eoditdeora.collector.model import ChangeKind, CollectedFile
@@ -55,6 +56,12 @@ class IndexerDaemon:
             "deleted": 0,
             "errors": 0,
         }
+        # Surfaced through `indexer.status` so the UI can show a
+        # progress banner when a new root is being ingested. A rough
+        # approximation is fine — we do NOT want to block the worker
+        # to compute totals.
+        self._last_file: str | None = None
+        self._last_event_ts: float = 0.0
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -98,6 +105,22 @@ class IndexerDaemon:
     def stats(self) -> dict[str, int]:
         with self._lock:
             return dict(self._stats)
+
+    def progress(self) -> dict[str, Any]:
+        """Snapshot for the UI progress banner.
+
+        ``queue_size`` is a cheap estimate (``queue.qsize``) — good
+        enough to tell the UI whether work is pending without locking.
+        """
+        with self._lock:
+            last_file = self._last_file
+            last_ts = self._last_event_ts
+        return {
+            "queue_size": self._queue.qsize(),
+            "last_file": last_file,
+            "last_event_ts": last_ts,
+            "running": self._running,
+        }
 
     # ------------------------------------------------------------------
     # Internals
@@ -225,6 +248,8 @@ class IndexerDaemon:
                             self._stats["deleted"] += 1
                         else:
                             self._stats["skipped"] += 1
+                        self._last_file = str(item.path)
+                        self._last_event_ts = time.time()
                 except Exception as e:  # noqa: BLE001
                     log.exception("indexer_worker_error", path=str(item.path), error=str(e))
                     with self._lock:

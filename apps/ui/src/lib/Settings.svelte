@@ -276,7 +276,14 @@
     try {
       const p = await endpointsTest(e.base_url, e.api_key, e.api_kind);
       health[role] = {
-        ...(health[role] ?? { configured: true, base_url: e.base_url, model_id: e.model_id, active_model: "" }),
+        ...(health[role] ?? {
+          configured: true,
+          base_url: e.base_url,
+          model_id: e.model_id,
+          active_model: "",
+          api_kind: e.api_kind,
+          remote: false,
+        }),
         reachable: p.reachable,
         error: p.error,
         models: p.models,
@@ -307,7 +314,13 @@
         {#each roots as r}
           <li>
             <span class="path" title={r}>{r}</span>
-            <button class="remove" onclick={() => onRemove(r)} disabled={busy[r]}>제거</button>
+            <button
+              class="remove"
+              onclick={() => onRemove(r)}
+              disabled={busy[r]}
+              title="이 폴더를 감시 목록에서 제거"
+              aria-label="{r} 제거"
+            >{busy[r] ? "…" : "✕"}</button>
           </li>
         {/each}
       </ul>

@@ -15,7 +15,7 @@ def test_version_flag():
     runner = CliRunner()
     r = runner.invoke(cli_mod.cli, ["--version"])
     assert r.exit_code == 0
-    assert "0.1.2" in r.output
+    assert "0.1.3" in r.output
 
 
 def test_add_root(tmp_path: Path):

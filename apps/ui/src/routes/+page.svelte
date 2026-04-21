@@ -1,15 +1,20 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import { listen } from "@tauri-apps/api/event";
   import Settings from "$lib/Settings.svelte";
   import {
+    endpointsHealth,
     filesSearch,
     filesStats,
+    indexerStatus,
     openInOs,
     ping,
     search,
+    type EndpointHealth,
     type FastRow,
     type FastStats,
+    type IndexerProgress,
+    type Role,
     type SearchResponse,
   } from "$lib/rpc";
 
@@ -29,6 +34,18 @@
   let showSidebar = $state(false);
   let inputEl: HTMLInputElement | undefined = $state();
   let debounceTimer: number | undefined;
+
+  // Keyboard-nav: selectedIndex is shared across tabs and always
+  // points into the currently-visible result list.
+  let selectedIndex = $state(-1);
+
+  // Indexer progress polling.
+  let progress = $state<IndexerProgress | null>(null);
+  let progressTimer: number | undefined;
+
+  // Header health LED.
+  let health = $state<Record<Role, EndpointHealth> | null>(null);
+  let healthTimer: number | undefined;
 
   onMount(async () => {
     try {
@@ -51,7 +68,114 @@
       // Non-Tauri host (dev bridge) has no event bus.
     }
     inputEl?.focus();
+    startProgressPoll();
+    startHealthPoll();
   });
+
+  onDestroy(() => {
+    if (progressTimer) window.clearInterval(progressTimer);
+    if (healthTimer) window.clearInterval(healthTimer);
+    if (debounceTimer) window.clearTimeout(debounceTimer);
+  });
+
+  function startProgressPoll() {
+    const tick = async () => {
+      try {
+        progress = await indexerStatus();
+      } catch {
+        progress = null;
+      }
+    };
+    void tick();
+    progressTimer = window.setInterval(tick, 2000) as unknown as number;
+  }
+
+  function startHealthPoll() {
+    const tick = async () => {
+      try {
+        const r = await endpointsHealth();
+        health = r.roles;
+      } catch {
+        health = null;
+      }
+    };
+    void tick();
+    healthTimer = window.setInterval(tick, 10000) as unknown as number;
+  }
+
+  function currentResults(): Array<{ path: string }> {
+    if (mode === "name") {
+      return nameResults.map((r) => ({ path: r.path }));
+    }
+    const src = mode === "content" ? contentResponse : aiResponse;
+    return (src?.results ?? []).map((r) => ({ path: r.source_path_display }));
+  }
+
+  function clampSelection() {
+    const n = currentResults().length;
+    if (n === 0) {
+      selectedIndex = -1;
+      return;
+    }
+    if (selectedIndex < 0) selectedIndex = 0;
+    if (selectedIndex >= n) selectedIndex = n - 1;
+  }
+
+  function scrollSelectedIntoView() {
+    queueMicrotask(() => {
+      const el = document.querySelector<HTMLElement>(
+        `[data-result-index='${selectedIndex}']`,
+      );
+      el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
+  }
+
+  $effect(() => {
+    // Whenever the result list changes, reset selection to the top.
+    contentResponse;
+    aiResponse;
+    nameResults;
+    selectedIndex = currentResults().length ? 0 : -1;
+  });
+
+  function isHealthy(h: EndpointHealth | undefined): boolean {
+    return !!h && h.configured && h.reachable;
+  }
+
+  function healthColor(): "green" | "amber" | "red" {
+    if (!health) return "red";
+    const llm = isHealthy(health.llm);
+    const embed = isHealthy(health.embed);
+    const rerank = isHealthy(health.rerank);
+    if (llm && embed) return "green";
+    if (llm || embed || rerank) return "amber";
+    return "red";
+  }
+
+  function healthTooltip(): string {
+    if (!health) return "사이드카 연결 확인 중";
+    const parts: string[] = [];
+    for (const role of ["llm", "embed", "rerank"] as Role[]) {
+      const h = health[role];
+      const dot = isHealthy(h) ? "●" : "○";
+      const label = role === "llm" ? "LLM" : role === "embed" ? "EMBED" : "RERANK";
+      const state = !h?.configured
+        ? "미설정"
+        : h?.reachable
+          ? h.model_id || "OK"
+          : h?.error ?? "연결 안됨";
+      parts.push(`${dot} ${label}: ${state}`);
+    }
+    return parts.join("\n");
+  }
+
+  function indexingActive(): boolean {
+    if (!progress) return false;
+    if (progress.queue_size > 0) return true;
+    // "recently active" = event within the last 3s
+    const nowSec = Date.now() / 1000;
+    return progress.last_event_ts > 0 && nowSec - progress.last_event_ts < 3;
+  }
 
   // Reactive: typing in name mode triggers a debounced fast search so
   // results land as the user types without hammering the backend.
@@ -109,7 +233,36 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
+    // Esc clears the query from anywhere.
+    if (e.key === "Escape") {
+      if (query) {
+        e.preventDefault();
+        query = "";
+        nameResults = [];
+        contentResponse = null;
+        aiResponse = null;
+        warning = null;
+        selectedIndex = -1;
+        return;
+      }
+    }
+    const results = currentResults();
+    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && results.length) {
+      e.preventDefault();
+      if (e.key === "ArrowDown") {
+        selectedIndex = Math.min(selectedIndex + 1, results.length - 1);
+      } else {
+        selectedIndex = Math.max(selectedIndex - 1, 0);
+      }
+      scrollSelectedIntoView();
+      return;
+    }
     if (e.key === "Enter") {
+      if (selectedIndex >= 0 && selectedIndex < results.length) {
+        e.preventDefault();
+        void openInOs(results[selectedIndex].path);
+        return;
+      }
       if (mode === "content") void runContentSearch(query, false);
       if (mode === "ai") void runContentSearch(query, true);
     }
@@ -119,6 +272,7 @@
     mode = m;
     errorMessage = null;
     warning = null;
+    selectedIndex = -1;
     if (m === "name" && query.trim()) {
       void runNameSearch(query);
     }
@@ -164,6 +318,12 @@
           </div>
         {/if}
         <button
+          class="health health-{healthColor()}"
+          onclick={() => (showSidebar = true)}
+          title={healthTooltip()}
+          aria-label="엔드포인트 상태"
+        ><span class="led"></span></button>
+        <button
           class="gear"
           onclick={() => (showSidebar = !showSidebar)}
           title={showSidebar ? "설정 닫기" : "설정 열기"}
@@ -179,7 +339,7 @@
       </button>
       <button class="tab" class:active={mode === "content"} onclick={() => onTabClick("content")}>
         <span class="tab-title">내용</span>
-        <span class="tab-hint">본문 키워드</span>
+        <span class="tab-hint">키워드 · AI 불필요</span>
       </button>
       <button class="tab" class:active={mode === "ai"} onclick={() => onTabClick("ai")}>
         <span class="tab-title">AI</span>
@@ -209,6 +369,17 @@
     {#if warning}
       <div class="warning">{warning}</div>
     {/if}
+    {#if indexingActive() && progress}
+      <div class="progress" role="status" aria-live="polite">
+        <span class="spinner"></span>
+        <span class="progress-text">
+          인덱싱 중 · {progress.stats.indexed.toLocaleString()}개 완료 · 대기 {progress.queue_size}
+          {#if progress.last_file}
+            <span class="progress-file" title={progress.last_file}>· {progress.last_file.split(/[\\/]/).pop()}</span>
+          {/if}
+        </span>
+      </div>
+    {/if}
     {#if loading}
       <div class="status">검색 중...</div>
     {/if}
@@ -216,8 +387,13 @@
     {#if mode === "name"}
       {#if nameResults.length}
         <section class="file-list">
-          {#each nameResults as r}
-            <button class="file-row" onclick={() => openInOs(r.path)}>
+          {#each nameResults as r, i}
+            <button
+              class="file-row"
+              class:selected={i === selectedIndex}
+              data-result-index={i}
+              onclick={() => openInOs(r.path)}
+            >
               <div class="file-name">
                 <span class="ext-chip">{r.ext || "file"}</span>
                 <span class="name-text">{r.name}</span>
@@ -253,12 +429,23 @@
       {#if contentResponse?.results?.length}
         <section class="results">
           {#each contentResponse.results as hit, i}
-            <button class="card" onclick={() => openInOs(hit.source_path_display)}>
+            <button
+              class="card"
+              class:selected={i === selectedIndex}
+              data-result-index={i}
+              onclick={() => openInOs(hit.source_path_display)}
+            >
               <div class="title">
                 {hit.title || basename(hit.source_path_display)}
                 {#if hit.classification}<span class="tag">{hit.classification}</span>{/if}
               </div>
-              <div class="snippet">{hit.snippet}</div>
+              <div class="snippet">
+                {#if hit.snippet_html}
+                  {@html hit.snippet_html}
+                {:else}
+                  {hit.snippet}
+                {/if}
+              </div>
               <div class="path">{hit.source_path_display}</div>
               <div class="score">#{i + 1} · score {hit.score.toFixed(3)}</div>
             </button>
@@ -268,7 +455,7 @@
         <div class="status">결과 없음. 본문 색인이 아직일 수 있습니다.</div>
       {:else if !query.trim()}
         <div class="hint-panel">
-          <p>📄 문서 본문에서 키워드를 검색합니다. BM25 + 임베딩 하이브리드.</p>
+          <p>📄 문서 본문에서 키워드를 찾습니다. BM25 렉시컬 검색 — AI 서버가 꺼져있어도 즉답.</p>
           <p class="small">Enter 또는 탭 전환으로 실행됩니다.</p>
         </div>
       {/if}
@@ -293,12 +480,23 @@
       {#if aiResponse?.results?.length}
         <section class="results">
           {#each aiResponse.results as hit, i}
-            <button class="card" onclick={() => openInOs(hit.source_path_display)}>
+            <button
+              class="card"
+              class:selected={i === selectedIndex}
+              data-result-index={i}
+              onclick={() => openInOs(hit.source_path_display)}
+            >
               <div class="title">
                 {hit.title || basename(hit.source_path_display)}
                 {#if hit.classification}<span class="tag">{hit.classification}</span>{/if}
               </div>
-              <div class="snippet">{hit.snippet}</div>
+              <div class="snippet">
+                {#if hit.snippet_html}
+                  {@html hit.snippet_html}
+                {:else}
+                  {hit.snippet}
+                {/if}
+              </div>
               <div class="path">{hit.source_path_display}</div>
               <div class="score">#{i + 1} · score {hit.score.toFixed(3)}</div>
             </button>
@@ -361,6 +559,62 @@
     padding: 4px 8px;
     cursor: pointer;
     font-size: 14px;
+  }
+  .health {
+    background: transparent;
+    border: 1px solid #2a2f3a;
+    border-radius: 6px;
+    padding: 0 8px;
+    height: 26px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+  }
+  .health .led {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #4b5563;
+    box-shadow: 0 0 6px transparent;
+    transition: background 120ms ease, box-shadow 120ms ease;
+  }
+  .health-green .led { background: #22c55e; box-shadow: 0 0 6px #22c55e80; }
+  .health-amber .led { background: #f59e0b; box-shadow: 0 0 6px #f59e0b80; }
+  .health-red .led   { background: #ef4444; box-shadow: 0 0 6px #ef444480; }
+  .progress {
+    margin: 10px 0 4px;
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: #121821;
+    border: 1px solid #1f2b3a;
+    color: #7ec0ff;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .spinner {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid #1f2b3a;
+    border-top-color: #7ec0ff;
+    animation: spin 0.9s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .progress-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .progress-file {
+    color: #a8c5ec;
+    margin-left: 4px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 11px;
+  }
+  .snippet :global(mark) {
+    background: #5b3b00;
+    color: #ffd684;
+    padding: 0 2px;
+    border-radius: 3px;
   }
   .version {
     font-size: 11px;
@@ -476,6 +730,7 @@
     gap: 12px;
   }
   .file-row:hover { background: #141822; }
+  .file-row.selected { background: #1b2435; outline: 1px solid #4b7bff; }
   .file-name {
     display: flex;
     gap: 8px;
@@ -568,6 +823,11 @@
   .card:hover {
     border-color: #4b7bff;
     background: #151924;
+  }
+  .card.selected {
+    border-color: #4b7bff;
+    background: #162035;
+    box-shadow: 0 0 0 1px #4b7bff55;
   }
   .title {
     font-size: 14px;
