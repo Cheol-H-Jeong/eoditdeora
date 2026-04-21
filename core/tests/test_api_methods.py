@@ -289,6 +289,28 @@ async def test_history_clear_rpc():
 
 
 @pytest.mark.asyncio
+async def test_history_record_query_ignores_non_string_value():
+    server = RpcServer()
+
+    resp = await _call(server, "history.record_query", {"query": None})
+    top = await _call(server, "history.top", {"kinds": ["queries"]})
+
+    assert resp["result"] == {"ok": True}
+    assert top["result"]["queries"] == []
+
+
+@pytest.mark.asyncio
+async def test_history_record_open_ignores_non_string_value():
+    server = RpcServer()
+
+    resp = await _call(server, "history.record_open", {"path": {"bad": "input"}})
+    top = await _call(server, "history.top", {"kinds": ["opens"]})
+
+    assert resp["result"] == {"ok": True}
+    assert top["result"]["opens"] == []
+
+
+@pytest.mark.asyncio
 async def test_history_top_rejects_non_integer_limits():
     server = RpcServer()
 

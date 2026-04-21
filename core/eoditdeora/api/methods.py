@@ -434,7 +434,9 @@ async def _history_record_query(params: dict[str, Any]) -> dict[str, Any]:
 
     history = HistoryStore()
     try:
-        history.record_query(str(params.get("query", "")))
+        query = params.get("query", "")
+        if isinstance(query, str):
+            history.record_query(query)
         return {"ok": True}
     finally:
         history.close()
@@ -445,7 +447,9 @@ async def _history_record_open(params: dict[str, Any]) -> dict[str, Any]:
 
     history = HistoryStore()
     try:
-        history.record_open(str(params.get("path", "")))
+        path = params.get("path", "")
+        if isinstance(path, str):
+            history.record_open(path)
         return {"ok": True}
     finally:
         history.close()
