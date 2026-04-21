@@ -118,6 +118,11 @@ def _lock_for(path: Path) -> threading.Lock:
         return lock
 
 
+def _root_like_pattern(root: Path | str) -> str:
+    p = str(Path(root)).rstrip(os.sep) + os.sep
+    return p.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
 class FastIndex:
     """Thread-safe file-name index.
 
@@ -225,16 +230,44 @@ class FastIndex:
         `_` was a real bug because e.g. `/home/x/my_docs` would have
         matched `/home/x/myAdocs` too and deleted unrelated rows.
         """
-        p = str(Path(root)).rstrip(os.sep) + os.sep
-        like_pattern = (
-            p.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-        )
+        like_pattern = _root_like_pattern(root)
         with self._lock:
             cur = self._conn.execute(
                 "DELETE FROM files WHERE path LIKE ? ESCAPE '\\'",
                 (like_pattern,),
             )
             return int(cur.rowcount or 0)
+
+    def delete_missing_under(self, root: Path | str, keep_paths: set[str]) -> int:
+        """Drop rows under `root` that were not seen during a rescan.
+
+        The fast scan mirrors the current filesystem into this store.
+        Without the stale-row purge, deleting a file outside the app and
+        hitting "rescan" would keep surfacing the removed path forever.
+        """
+        if not keep_paths:
+            return self.delete_under(root)
+
+        like_pattern = _root_like_pattern(root)
+        with self._lock:
+            with self._conn:
+                self._conn.execute(
+                    "CREATE TEMP TABLE IF NOT EXISTS keep_paths(path TEXT PRIMARY KEY)"
+                )
+                self._conn.execute("DELETE FROM keep_paths")
+                self._conn.executemany(
+                    "INSERT INTO keep_paths(path) VALUES (?)",
+                    ((path,) for path in sorted(keep_paths)),
+                )
+                cur = self._conn.execute(
+                    "DELETE FROM files "
+                    "WHERE path LIKE ? ESCAPE '\\' "
+                    "  AND path NOT IN (SELECT path FROM keep_paths)",
+                    (like_pattern,),
+                )
+                deleted = int(cur.rowcount or 0)
+                self._conn.execute("DELETE FROM keep_paths")
+                return deleted
 
     # ------------------------------------------------------------------
     # Query

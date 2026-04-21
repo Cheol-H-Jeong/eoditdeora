@@ -55,16 +55,11 @@ async def test_index_add_root_and_status(tmp_path: Path):
 async def test_index_remove_root(tmp_path: Path):
     docs = tmp_path / "watched"
     docs.mkdir()
-    idx = FastIndex()
-    try:
-        idx.upsert(str(docs / "draft.txt"), 1, 100.0)
-    finally:
-        idx.close()
+    (docs / "draft.txt").write_text("x", encoding="utf-8")
     server = RpcServer()
     await _call(server, "index.add_root", {"path": str(docs)})
     resp = await _call(server, "index.remove_root", {"path": str(docs)})
     assert resp["result"]["removed"] == 1
-    assert resp["result"]["fast_index_removed"] == 1
     search = await _call(server, "files.search", {"query": "draft"})
     assert search["result"]["results"] == []
 

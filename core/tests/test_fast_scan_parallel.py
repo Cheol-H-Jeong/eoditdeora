@@ -76,3 +76,26 @@ def test_scan_root_empty_root(tmp_path: Path):
     root.mkdir()
 
     assert scan_root(root, {".txt"}, 0) == (0, 0)
+
+
+def test_scan_root_rescan_removes_deleted_files(tmp_path: Path):
+    root = tmp_path / "docs"
+    root.mkdir()
+    first = root / "keep.txt"
+    second = root / "drop.txt"
+    first.write_text("a", encoding="utf-8")
+    second.write_text("b", encoding="utf-8")
+
+    assert scan_root(root, {".txt"}, 0) == (2, 2)
+
+    second.unlink()
+    assert scan_root(root, {".txt"}, 0) == (1, 1)
+
+    idx = FastIndex()
+    try:
+        paths = {row.path for row in idx.search("txt", limit=20)}
+    finally:
+        idx.close()
+
+    assert str(first.resolve()) in paths
+    assert str(second.resolve()) not in paths

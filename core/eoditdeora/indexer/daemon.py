@@ -161,7 +161,16 @@ class IndexerDaemon:
             log.warning("allowed_exts_reload_failed", error=str(e))
             return set()
 
+    def _root_is_active(self, root: Path) -> bool:
+        try:
+            return any(Path(raw).resolve() == root.resolve() for raw in load_settings().index.roots)
+        except Exception as e:  # noqa: BLE001
+            log.warning("root_active_check_failed", root=str(root), error=str(e))
+            return True
+
     def _catch_up_scan(self, root: Path, matcher: IgnoreMatcher, max_bytes: int) -> None:
+        if not self._root_is_active(root):
+            return
         # Fast-index walk first: single pass with zero parsing cost so
         # the name-search UI becomes responsive within seconds of a new
         # root being added, even on a 200k-file Documents tree.
@@ -171,13 +180,25 @@ class IndexerDaemon:
             settings = load_settings()
             allowed = {e.lower() for e in settings.index.extensions}
             seen, up = scan_root(root, allowed, max_bytes)
+            if not self._root_is_active(root):
+                fast = FastIndex()
+                try:
+                    fast.delete_under(root)
+                finally:
+                    fast.close()
+                log.info("fast_index_warmup_aborted", root=str(root))
+                return
             log.info("fast_index_warmup_done", root=str(root), seen=seen, upserted=up)
         except Exception as e:  # noqa: BLE001
             log.warning("fast_index_warmup_failed", root=str(root), error=str(e))
 
+        if not self._root_is_active(root):
+            return
         scanner = Scanner(root, ignore=matcher, max_bytes=max_bytes)
         count = 0
         for rec in scanner.walk():
+            if not self._root_is_active(root):
+                return
             self._enqueue(rec)
             count += 1
         log.info("catch_up_scan_done", root=str(root), files=count)

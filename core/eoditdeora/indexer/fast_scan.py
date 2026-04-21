@@ -120,6 +120,7 @@ def _scan_root_impl(
     fast = FastIndex()
     seen = 0
     upserted = 0
+    current_paths: set[str] = set()
     batch: list[tuple[str, int, float]] = []
     outbox: queue.Queue[tuple[object, int, float]] = queue.Queue(maxsize=_BATCH * 4)
     subroots: list[Path] = []
@@ -146,7 +147,9 @@ def _scan_root_impl(
                     continue
                 if max_bytes and st.st_size > max_bytes:
                     continue
-                batch.append((str(full), st.st_size, st.st_mtime))
+                path_str = str(full)
+                current_paths.add(path_str)
+                batch.append((path_str, st.st_size, st.st_mtime))
                 if len(batch) >= _BATCH:
                     upserted += fast.upsert_many(batch)
                     batch.clear()
@@ -158,7 +161,9 @@ def _scan_root_impl(
                     if item[0] is _SUBROOT_DONE:
                         seen += int(item[1])
                         break
-                    batch.append((str(item[0]), int(item[1]), float(item[2])))
+                    path_str = str(item[0])
+                    current_paths.add(path_str)
+                    batch.append((path_str, int(item[1]), float(item[2])))
                     if len(batch) >= _BATCH:
                         upserted += fast.upsert_many(batch)
                         batch.clear()
@@ -182,7 +187,9 @@ def _scan_root_impl(
                         seen += int(item[1])
                         completed += 1
                         continue
-                    batch.append((str(item[0]), int(item[1]), float(item[2])))
+                    path_str = str(item[0])
+                    current_paths.add(path_str)
+                    batch.append((path_str, int(item[1]), float(item[2])))
                     if len(batch) >= _BATCH:
                         upserted += fast.upsert_many(batch)
                         batch.clear()
@@ -190,6 +197,9 @@ def _scan_root_impl(
                     future.result()
         if batch:
             upserted += fast.upsert_many(batch)
+        deleted = fast.delete_missing_under(root, current_paths)
+        if deleted:
+            log.info("fast_scan_stale_rows_deleted", root=str(root), deleted=deleted)
     finally:
         fast.close()
     return seen, upserted

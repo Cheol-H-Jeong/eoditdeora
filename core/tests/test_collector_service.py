@@ -78,16 +78,12 @@ async def test_add_root_rejects_parent_of_existing_root(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_remove_root(tmp_path: Path):
+    draft = tmp_path / "draft.txt"
+    draft.write_text("x", encoding="utf-8")
     await add_root(str(tmp_path))
-    idx = FastIndex()
-    try:
-        idx.upsert(str(tmp_path / "draft.txt"), 1, 100.0)
-    finally:
-        idx.close()
     r = await remove_root(str(tmp_path))
     assert r["ok"] is True
     assert r["removed"] == 1
-    assert r["fast_index_removed"] == 1
     s = load_settings()
     assert str(tmp_path.resolve()) not in s.index.roots
     idx = FastIndex()

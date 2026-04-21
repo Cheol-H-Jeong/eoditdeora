@@ -90,6 +90,18 @@ def test_delete_under_escapes_like_metacharacters(idx: FastIndex):
     assert "/home/x/my_docs/keep.txt" not in paths
 
 
+def test_delete_missing_under_keeps_seen_paths_only(idx: FastIndex):
+    idx.upsert_many([
+        ("/root/docs/keep.txt", 1, 100.0),
+        ("/root/docs/drop.txt", 1, 100.0),
+        ("/root/other/untouched.txt", 1, 100.0),
+    ])
+    deleted = idx.delete_missing_under("/root/docs", {"/root/docs/keep.txt"})
+    assert deleted == 1
+    paths = {r.path for r in idx.search("txt")}
+    assert paths == {"/root/docs/keep.txt", "/root/other/untouched.txt"}
+
+
 def test_stats_by_ext(idx: FastIndex):
     idx.upsert_many([
         ("/x/a.pdf", 1, 100.0),
