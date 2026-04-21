@@ -5,7 +5,12 @@ from collections.abc import Iterator
 import httpx
 import pytest
 
-from eoditdeora.api.rpc_server import ERR_UPSTREAM_RATE_LIMIT, ERR_UPSTREAM_UNAVAILABLE, RpcError
+from eoditdeora.api.rpc_server import (
+    ERR_UPSTREAM_BAD_RESPONSE,
+    ERR_UPSTREAM_RATE_LIMIT,
+    ERR_UPSTREAM_UNAVAILABLE,
+    RpcError,
+)
 from eoditdeora.runtime.clients import LlmClient
 
 
@@ -214,3 +219,24 @@ def test_chat_stream_does_not_retry_after_partial_output(
     assert chunks == ["첫 청크"]
     assert ei.value.code == ERR_UPSTREAM_UNAVAILABLE
     assert attempts["count"] == 1
+
+
+def test_chat_stream_bad_sse_chunk_preserves_payload_detail(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def fake_stream(_method: str, _url: str, **_kwargs):
+        return _MockStreamResponse(
+            [
+                "data: {not json",
+                "data: [DONE]",
+            ]
+        )
+
+    monkeypatch.setattr(httpx, "stream", fake_stream)
+    client = LlmClient("127.0.0.1", 0)
+
+    with pytest.raises(RpcError) as ei:
+        list(client.chat_stream("sys", "usr"))
+    assert ei.value.code == ERR_UPSTREAM_BAD_RESPONSE
+    assert ei.value.data is not None
+    assert ei.value.data.get("detail") == "sse_chunk={not json"

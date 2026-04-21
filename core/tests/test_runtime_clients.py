@@ -215,7 +215,11 @@ def test_embed_retries_transport_error_then_succeeds(monkeypatch: pytest.MonkeyP
 
 def test_llm_non_json_body_raises_bad_response():
     def handler(_req: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, text="<html>login</html>")
+        return httpx.Response(
+            200,
+            text="<html><title>Sign in</title><body>login required</body></html>",
+            headers={"content-type": "text/html; charset=utf-8"},
+        )
 
     client = LlmClient("127.0.0.1", 0)
     client._client = _mock_client(handler)  # type: ignore[attr-defined]
@@ -223,6 +227,11 @@ def test_llm_non_json_body_raises_bad_response():
         client.chat("s", "u")
     from eoditdeora.api.rpc_server import ERR_UPSTREAM_BAD_RESPONSE
     assert ei.value.code == ERR_UPSTREAM_BAD_RESPONSE
+    assert ei.value.data is not None
+    assert ei.value.data.get("detail") == (
+        "content-type=text/html; charset=utf-8 | "
+        "body=<html><title>Sign in</title><body>login required</body></html>"
+    )
 
 
 def test_llm_429_raises_rate_limit_after_retries(monkeypatch: pytest.MonkeyPatch):

@@ -88,16 +88,20 @@ export function formatRpcError(error: unknown): string {
     }
     if (code === -32011) {
       const endpointHint = endpoint ? ` (${endpoint})` : "";
-      return `${role} 서버 주소 또는 모델 ID를 찾을 수 없습니다${endpointHint}. 설정 값을 확인하세요.`;
+      return `${role} 서버 주소 또는 모델 ID를 찾을 수 없습니다${endpointHint}. 설정 값을 확인하세요.${detailSuffix(error.data?.detail)}`;
     }
     if (code === -32012) {
+      if (typeof status === "number" && status >= 400 && status < 500) {
+        const endpointHint = endpoint ? ` (${endpoint})` : "";
+        return `${role} 서버가 요청을 처리하지 못했습니다${endpointHint} (HTTP ${status}). 주소, 모델 ID, 인증 설정을 확인하세요.${detailSuffix(error.data?.detail)}`;
+      }
       const statusHint = typeof status === "number" ? ` (HTTP ${status})` : "";
       const endpointHint = endpoint ? ` ${endpoint}` : "";
       return `${role} 서버에 연결할 수 없습니다${statusHint}.${endpointHint} 서버가 실행 중인지 확인하세요.${detailSuffix(error.data?.detail)}`;
     }
     if (code === -32013) {
       const endpointHint = endpoint ? ` (${endpoint})` : "";
-      return `${role} 서버 응답 형식이 올바르지 않습니다${endpointHint}. OpenAI 호환 API인지 확인하세요.`;
+      return `${role} 서버 응답 형식이 올바르지 않습니다${endpointHint}. OpenAI 호환 API인지, 프록시가 HTML 로그인 페이지를 돌려주고 있지 않은지 확인하세요.${detailSuffix(error.data?.detail)}`;
     }
     if (code === -32014) {
       return `${role} 서버 요청 한도에 걸렸습니다. 잠시 후 다시 시도하거나 동시 요청 수를 줄이세요.`;

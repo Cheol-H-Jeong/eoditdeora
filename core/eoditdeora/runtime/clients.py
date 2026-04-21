@@ -118,6 +118,29 @@ def _extract_error_detail(r: httpx.Response) -> str:
     return ""
 
 
+def _truncate_detail(text: str, *, limit: int = 160) -> str:
+    compact = " ".join(text.split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 1].rstrip() + "…"
+
+
+def _extract_bad_response_detail(r: httpx.Response) -> str:
+    content_type = r.headers.get("content-type", "").strip()
+    snippet = ""
+    try:
+        snippet = _truncate_detail(r.text)
+    except Exception:  # noqa: BLE001
+        snippet = ""
+
+    parts: list[str] = []
+    if content_type:
+        parts.append(f"content-type={content_type}")
+    if snippet:
+        parts.append(f"body={snippet}")
+    return " | ".join(parts)
+
+
 def _raise_upstream_for_status(r: httpx.Response, url: str, role: str) -> None:
     """Translate upstream HTTP errors into RpcError with helpful codes.
 
@@ -210,10 +233,13 @@ def _post_json(
         try:
             return r.json()  # type: ignore[no-any-return]
         except ValueError as e:
+            data = {"url": url, "role": role}
+            if detail := _extract_bad_response_detail(r):
+                data["detail"] = detail
             raise RpcError(
                 ERR_UPSTREAM_BAD_RESPONSE,
                 "추론 서버가 JSON이 아닌 응답을 돌려주었습니다",
-                {"url": url, "role": role},
+                data,
             ) from e
 
     raise AssertionError("unreachable")
@@ -375,10 +401,14 @@ class LlmClient(_EndpointClient):
                         try:
                             data = json.loads(payload)
                         except ValueError as e:
+                            detail = _truncate_detail(payload)
+                            data = {"url": url, "role": "llm"}
+                            if detail:
+                                data["detail"] = f"sse_chunk={detail}"
                             raise RpcError(
                                 ERR_UPSTREAM_BAD_RESPONSE,
                                 "추론 서버가 올바른 SSE JSON 청크를 돌려주지 않았습니다",
-                                {"url": url, "role": "llm"},
+                                data,
                             ) from e
                         choices = data.get("choices") or []
                         if not choices:
