@@ -56,12 +56,16 @@ class RuntimeSupervisor:
         return {role: self.is_running(role) for role in _ROLES}
 
     def health(self) -> dict[str, Any]:
+        from eoditdeora.runtime.presets import is_remote_url
+
         settings = load_settings()
         return {
             role: {
                 **health_for(getattr(settings.model, role), timeout=1.0),
                 "base_url": getattr(settings.model, role).base_url,
                 "model_id": getattr(settings.model, role).model_id,
+                "api_kind": getattr(settings.model, role).api_kind,
+                "remote": is_remote_url(getattr(settings.model, role).base_url),
             }
             for role in _ROLES
         }

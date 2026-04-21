@@ -111,6 +111,8 @@ export type EndpointHealth = {
   active_model: string;
   base_url: string;
   model_id: string;
+  api_kind: string;
+  remote: boolean;
 };
 
 export async function endpointsHealth(): Promise<{ roles: Record<Role, EndpointHealth> }> {
@@ -146,6 +148,21 @@ export type AutoConnectResult = {
 
 export async function endpointsAutoConnect(force = false): Promise<AutoConnectResult> {
   return rpc<AutoConnectResult>("endpoints.auto_connect", { force });
+}
+
+export type Preset = {
+  key: string;
+  display: string;
+  base_url: string;
+  api_kind: string;
+  requires_api_key: boolean;
+  default_models: string[];
+  notes: string;
+  remote: boolean;
+};
+
+export async function endpointsPresets(): Promise<{ presets: Preset[] }> {
+  return rpc<{ presets: Preset[] }>("endpoints.presets");
 }
 
 export type Settings = {

@@ -8,6 +8,7 @@
     endpointsAutoConnect,
     endpointsDiscover,
     endpointsHealth,
+    endpointsPresets,
     endpointsTest,
     endpointsUpdate,
     getSettings,
@@ -18,6 +19,7 @@
     type Endpoint,
     type EndpointHealth,
     type IndexStatus,
+    type Preset,
     type ProbeResult,
     type Role,
   } from "./rpc";
@@ -42,6 +44,9 @@
   let discovering = $state(false);
   let autoConnectMsg = $state<string>("");
   let autoConnecting = $state(false);
+  let presets = $state<Preset[]>([]);
+  let presetRole = $state<Role>("llm");
+  let activePresetKey = $state<string | null>(null);
 
   let newPath = $state("");
   let busy = $state<Record<string, boolean>>({});
@@ -68,6 +73,12 @@
 
   onMount(async () => {
     await refresh();
+    try {
+      const p = await endpointsPresets();
+      presets = p.presets;
+    } catch (e) {
+      console.warn(e);
+    }
     timer = window.setInterval(refresh, 3000);
   });
 
@@ -141,14 +152,45 @@
     }
   }
 
+  function isRemote(url: string): boolean {
+    try {
+      const u = new URL(url);
+      const h = (u.hostname || "").toLowerCase();
+      return h !== "" && !["127.0.0.1", "localhost", "::1", "0.0.0.0"].includes(h);
+    } catch {
+      return false;
+    }
+  }
+
   async function saveEndpoint(role: Role) {
+    const e = endpoints[role];
+    if (isRemote(e.base_url)) {
+      const ok = window.confirm(
+        "⚠️ 외부 원격 엔드포인트입니다.\n\n" +
+          `${e.base_url} 로 문서 내용이 전송됩니다.\n` +
+          "공무원·감사 대상 문서가 있다면 진행하지 마세요.\n\n" +
+          "저장할까요?"
+      );
+      if (!ok) return;
+    }
     busy = { ...busy, [`save:${role}`]: true };
     try {
-      await endpointsUpdate(role, endpoints[role]);
+      await endpointsUpdate(role, e);
       await refresh();
     } finally {
       busy = { ...busy, [`save:${role}`]: false };
     }
+  }
+
+  function applyPreset(preset: Preset, role: Role) {
+    activePresetKey = preset.key;
+    endpoints[role] = {
+      base_url: preset.base_url,
+      model_id: preset.default_models[0] ?? "",
+      api_key: endpoints[role].api_key,
+      api_kind: preset.api_kind,
+    };
+    presetRole = role;
   }
 
   async function clearEndpoint(role: Role) {
@@ -234,6 +276,7 @@
       엔드포인트를 고르면 연결만 합니다.
     </p>
 
+    <div class="subhead">로컬 (127.0.0.1)</div>
     <div class="discover-row">
       <button onclick={() => onAutoConnect(false)} disabled={autoConnecting}>
         {autoConnecting ? "연결 중..." : "자동 연결"}
@@ -281,21 +324,56 @@
       </ul>
     {/if}
 
+    {#if presets.length}
+      <div class="subhead">외부 API / 원격 서버</div>
+      <p class="hint small">
+        로컬에 서빙 중인 모델이 없을 때 사용합니다. 문서 내용이 해당 서버로
+        전송된다는 점에 주의하세요.
+      </p>
+      <div class="preset-grid">
+        {#each presets as pr}
+          <button
+            class="preset"
+            class:active={activePresetKey === pr.key}
+            onclick={() => applyPreset(pr, presetRole)}
+            title={pr.notes}
+          >
+            <span class="preset-name">{pr.display}</span>
+            {#if pr.remote}<span class="rbadge">원격</span>{/if}
+          </button>
+        {/each}
+      </div>
+      <div class="row small">
+        <span class="hint small">역할 선택:</span>
+        {#each ["llm", "embed", "rerank"] as role}
+          {@const r = role as Role}
+          <button
+            class="pick"
+            class:active={presetRole === r}
+            onclick={() => (presetRole = r)}
+          >{ROLE_LABELS[r]}</button>
+        {/each}
+      </div>
+    {/if}
+
     {#each ["llm", "embed", "rerank"] as role}
       {@const r = role as Role}
-      <div class="slot" class:ok={health[r]?.reachable}>
+      <div class="slot" class:ok={health[r]?.reachable} class:remote={health[r]?.remote}>
         <div class="row">
           <span class="name">{ROLE_LABELS[r]}</span>
-          <span class="badge">
-            {#if !endpoints[r].base_url}
-              미설정
-            {:else if health[r]?.reachable}
-              연결됨
-            {:else if health[r]?.error}
-              오류
-            {:else}
-              확인 중
-            {/if}
+          <span class="badges">
+            {#if health[r]?.remote}<span class="rbadge">원격</span>{/if}
+            <span class="badge">
+              {#if !endpoints[r].base_url}
+                미설정
+              {:else if health[r]?.reachable}
+                연결됨
+              {:else if health[r]?.error}
+                오류
+              {:else}
+                확인 중
+              {/if}
+            </span>
           </span>
         </div>
         <input
@@ -431,6 +509,48 @@
     display: flex; flex-direction: column; gap: 6px;
   }
   .slot.ok { border-color: #0f4f2d; }
+  .slot.remote { border-color: #8a3b2b; }
+  .subhead {
+    margin-top: 6px;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #6b7280;
+    margin-bottom: 6px;
+  }
+  .preset-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .preset {
+    background: #141822;
+    border: 1px solid #1e2230;
+    color: #c7cbd3;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+    align-items: center;
+    text-align: left;
+  }
+  .preset:hover { border-color: #4b7bff; }
+  .preset.active { border-color: #4b7bff; background: #1a1f2e; }
+  .preset-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rbadge {
+    font-size: 9.5px;
+    padding: 1px 5px;
+    border-radius: 6px;
+    background: #3a1f22;
+    color: #ff9c9c;
+    border: 1px solid #5a2e33;
+  }
+  .badges { display: flex; gap: 4px; align-items: center; }
+  .pick.active { background: #4b7bff; color: #fff; }
   .row { display: flex; gap: 6px; align-items: center; justify-content: space-between; }
   .row.small > * { flex: 1; min-width: 0; }
   .name { font-size: 12px; font-weight: 600; }

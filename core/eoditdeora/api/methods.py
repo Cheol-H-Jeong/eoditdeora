@@ -162,6 +162,12 @@ async def _endpoints_test(params: dict[str, Any]) -> dict[str, Any]:
     return probe(base_url, api_key=api_key, api_kind=api_kind).to_dict()
 
 
+async def _endpoints_presets(_: dict[str, Any]) -> dict[str, Any]:
+    from eoditdeora.runtime.presets import list_presets
+
+    return {"presets": list_presets()}
+
+
 async def _endpoints_auto_connect(params: dict[str, Any]) -> dict[str, Any]:
     """Re-run the auto-connection scan on demand.
 
@@ -264,6 +270,7 @@ def register_all(server: RpcServer) -> None:
     server.register("endpoints.test", _endpoints_test)
     server.register("endpoints.update", _endpoints_update)
     server.register("endpoints.auto_connect", _endpoints_auto_connect)
+    server.register("endpoints.presets", _endpoints_presets)
     server.register("first_run.bootstrap", _first_run_bootstrap)
     server.register("forget", _forget)
     server.register("open_file", _open_file)
