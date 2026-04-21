@@ -153,6 +153,35 @@ def _raise_bad_response(url: str, role: str, detail: str) -> None:
     )
 
 
+def _extract_llm_message_text(data: dict[str, Any], url: str) -> str:
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        _raise_bad_response(url, "llm", "missing choices[]")
+
+    first_choice = choices[0]
+    if not isinstance(first_choice, dict):
+        _raise_bad_response(url, "llm", "choices[0] is not an object")
+
+    msg = first_choice.get("message")
+    if not isinstance(msg, dict):
+        _raise_bad_response(url, "llm", "choices[0].message is missing")
+
+    # Reasoning models sometimes emit an empty `content` but keep the only
+    # textual payload in a sibling reasoning field.
+    content = _coerce_text_content(msg.get("content"))
+    if not content:
+        content = _coerce_text_content(
+            msg.get("reasoning_content") or msg.get("reasoning")
+        )
+    if not content:
+        _raise_bad_response(
+            url,
+            "llm",
+            "choices[0].message has no usable content/reasoning text",
+        )
+    return str(content)
+
+
 def _raise_upstream_for_status(r: httpx.Response, url: str, role: str) -> None:
     """Translate upstream HTTP errors into RpcError with helpful codes.
 
@@ -313,6 +342,7 @@ class LlmClient(_EndpointClient):
         stop: list[str] | None = None,
         response_format: dict[str, Any] | None = None,
     ) -> str:
+        url = resolve_chat_url(self._endpoint)
         body: dict[str, Any] = {
             "messages": [
                 {"role": "system", "content": system},
@@ -327,25 +357,8 @@ class LlmClient(_EndpointClient):
             body["stop"] = stop
         if response_format:
             body["response_format"] = response_format
-        data = _post_json(self._client, resolve_chat_url(self._endpoint), body, role="llm")
-        choices = data.get("choices") or []
-        if not choices:
-            return ""
-        msg = choices[0].get("message") or {}
-        # Reasoning models (gpt-oss, o1-style) sometimes return an empty
-        # `content` with the actual answer in a sibling `reasoning` field
-        # when token budget is tight. Fall back to that rather than
-        # surfacing an empty string to the retriever.
-        content = _coerce_text_content(msg.get("content"))
-        # Different reasoning-model conventions: OpenAI o1 / gpt-oss use
-        # `reasoning`, llama-server with Qwen reasoning uses
-        # `reasoning_content`. Fall back to whichever is populated so
-        # the caller doesn't silently receive an empty answer.
-        if not content:
-            content = _coerce_text_content(
-                msg.get("reasoning_content") or msg.get("reasoning")
-            )
-        return str(content)
+        data = _post_json(self._client, url, body, role="llm")
+        return _extract_llm_message_text(data, url)
 
     def chat_stream(
         self,

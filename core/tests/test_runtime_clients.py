@@ -426,3 +426,43 @@ def test_llm_chat_joins_text_parts_from_content_array():
     client = LlmClient("127.0.0.1", 0)
     client._client = _mock_client(handler)  # type: ignore[attr-defined]
     assert client.chat("s", "u") == "첫 문장 둘째 문장"
+
+
+def test_llm_chat_missing_message_raises_bad_response():
+    def handler(_req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"choices": [{"finish_reason": "stop"}]})
+
+    client = LlmClient("127.0.0.1", 0)
+    client._client = _mock_client(handler)  # type: ignore[attr-defined]
+    with pytest.raises(RpcError) as ei:
+        client.chat("s", "u")
+    assert ei.value.code == ERR_UPSTREAM_BAD_RESPONSE
+    assert ei.value.data is not None
+    assert ei.value.data.get("detail") == "choices[0].message is missing"
+
+
+def test_llm_chat_empty_message_text_raises_bad_response():
+    def handler(_req: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": [],
+                            "reasoning": "",
+                            "reasoning_content": None,
+                        }
+                    }
+                ]
+            },
+        )
+
+    client = LlmClient("127.0.0.1", 0)
+    client._client = _mock_client(handler)  # type: ignore[attr-defined]
+    with pytest.raises(RpcError) as ei:
+        client.chat("s", "u")
+    assert ei.value.code == ERR_UPSTREAM_BAD_RESPONSE
+    assert ei.value.data is not None
+    assert ei.value.data.get("detail") == "choices[0].message has no usable content/reasoning text"
