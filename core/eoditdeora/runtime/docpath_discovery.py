@@ -68,6 +68,11 @@ class DocRoot:
         }
 
 
+def _env_path(value: str) -> Path:
+    """Resolve env-provided path strings that may still contain `$HOME`."""
+    return Path(os.path.expandvars(os.path.expanduser(value)))
+
+
 def candidate_paths() -> list[tuple[str, Path]]:
     """Ordered list of `(display_name, path)` candidates for this platform.
 
@@ -142,10 +147,10 @@ def candidate_paths() -> list[tuple[str, Path]]:
         # XDG override if set.
         xdg_docs = os.environ.get("XDG_DOCUMENTS_DIR")
         if xdg_docs:
-            candidates.append(("XDG Documents", Path(xdg_docs)))
+            candidates.append(("XDG Documents", _env_path(xdg_docs)))
         xdg_dl = os.environ.get("XDG_DOWNLOAD_DIR")
         if xdg_dl:
-            candidates.append(("XDG Downloads", Path(xdg_dl)))
+            candidates.append(("XDG Downloads", _env_path(xdg_dl)))
 
     # Deduplicate while preserving order — later entries with the same
     # path lose to earlier ones so the friendliest display name wins.

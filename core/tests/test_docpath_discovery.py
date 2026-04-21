@@ -52,6 +52,24 @@ def test_discover_detects_documents(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert docs_row.has_documents is True
 
 
+def test_discover_expands_xdg_env_vars(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    fake_home = tmp_path / "home"
+    docs = fake_home / "문서"
+    docs.mkdir(parents=True)
+    (docs / "budget.md").write_text("# 예산안", encoding="utf-8")
+
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("XDG_DOCUMENTS_DIR", "$HOME/문서")
+
+    results = mod.discover()
+    docs_row = next((r for r in results if Path(r.path) == docs.resolve()), None)
+    assert docs_row is not None
+    assert docs_row.display_name == "문서"
+    assert docs_row.exists is True
+    assert docs_row.has_documents is True
+
+
 def test_default_roots_includes_empty_documents_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # Canonical Documents/문서 directories are always auto-added even
     # when empty — users expect the app to watch them from day one.
