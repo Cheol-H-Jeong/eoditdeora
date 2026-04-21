@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import queue
 import threading
@@ -23,8 +24,33 @@ from eoditdeora.utils.paths_util import display_path
 log = get_logger(__name__)
 
 
-def _doc_id_for(path: Path) -> str:
+def _content_doc_id_for(path: Path) -> str:
     return f"sha256:{sha256_file(path)}"
+
+
+def _duplicate_doc_id_for(content_doc_id: str, path: Path) -> str:
+    path_digest = hashlib.sha256(str(path.resolve()).encode("utf-8")).hexdigest()[:12]
+    return f"{content_doc_id}#{path_digest}"
+
+
+def _doc_id_for(
+    path: Path,
+    *,
+    meta: MetaStore | None = None,
+    existing_doc_id: str | None = None,
+) -> str:
+    content_doc_id = _content_doc_id_for(path)
+    if existing_doc_id:
+        if existing_doc_id == content_doc_id or existing_doc_id.startswith(f"{content_doc_id}#"):
+            return existing_doc_id
+
+    if meta is None:
+        return content_doc_id
+
+    current = meta.get_document(content_doc_id)
+    if current is None or current["source_path"] == str(path):
+        return content_doc_id
+    return _duplicate_doc_id_for(content_doc_id, path)
 
 
 def _upsert_parsed_doc(
@@ -136,7 +162,7 @@ def index_file(
     if cf.change is ChangeKind.MOVED and cf.previous_path is not None:
         moved_doc_id = meta.replace_path(str(cf.previous_path), str(path))
         if moved_doc_id and path.exists() and path.is_file():
-            current_doc_id = _doc_id_for(path)
+            current_doc_id = _doc_id_for(path, meta=meta, existing_doc_id=moved_doc_id)
             if current_doc_id == moved_doc_id:
                 existing = meta.get_document_by_path(str(path))
                 if existing and existing["mtime_ns"] == cf.mtime_ns:
@@ -145,9 +171,15 @@ def index_file(
     if not path.exists() or not path.is_file():
         return {"status": "skipped", "reason": "file_missing", "path": str(path)}
 
+    existing = meta.get_document_by_path(str(path))
+
     if path.stat().st_size == 0:
         doc = ParsedDoc(
-            doc_id=_doc_id_for(path),
+            doc_id=_doc_id_for(
+                path,
+                meta=meta,
+                existing_doc_id=existing["doc_id"] if existing else None,
+            ),
             source_path=str(path),
             source_path_display=display_path(path),
             format=(path.suffix.lower().lstrip(".") or "unknown"),
@@ -161,8 +193,11 @@ def index_file(
         log.warning("parser_empty_file", path=str(path))
         return {"status": "skipped", "reason": "empty", "path": str(path)}
 
-    doc_id = _doc_id_for(path)
-    existing = meta.get_document_by_path(str(path))
+    doc_id = _doc_id_for(
+        path,
+        meta=meta,
+        existing_doc_id=existing["doc_id"] if existing else None,
+    )
     if existing and existing["doc_id"] == doc_id and existing["mtime_ns"] == cf.mtime_ns:
         return {"status": "unchanged", "path": str(path)}
     # If the same source_path had a previous doc_id (content changed), drop

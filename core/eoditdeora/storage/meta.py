@@ -243,6 +243,13 @@ class MetaStore:
         row = cur.fetchone()
         return dict(row) if row else None
 
+    def get_document(self, doc_id: str) -> dict[str, Any] | None:
+        cur = self._conn.execute(
+            "SELECT * FROM documents WHERE doc_id = ?", (doc_id,)
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
     def count_documents(self) -> int:
         cur = self._conn.execute("SELECT COUNT(*) AS n FROM documents")
         return int(cur.fetchone()["n"])

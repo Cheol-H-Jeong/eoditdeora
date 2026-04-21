@@ -166,3 +166,33 @@ def test_moved_file_preserves_doc_id_and_updates_path(tmp_path: Path, stores):
     assert current is not None
     assert current["doc_id"] == original["doc_id"]
     assert meta.get_document_by_path(str(src.resolve())) is None
+
+
+def test_duplicate_content_in_different_paths_keeps_both_documents(tmp_path: Path, stores):
+    meta, fts, vec = stores
+    root_a = tmp_path / "team-a"
+    root_b = tmp_path / "team-b"
+    root_a.mkdir()
+    root_b.mkdir()
+
+    first = root_a / "shared.txt"
+    second = root_b / "shared.txt"
+    content = "중복 본문 marker_dup_123"
+    first.write_text(content, encoding="utf-8")
+    second.write_text(content, encoding="utf-8")
+
+    result_first = index_file(_make_cf(first), meta=meta, fts=fts, vectors=vec)
+    result_second = index_file(_make_cf(second), meta=meta, fts=fts, vectors=vec)
+
+    assert result_first["status"] == "indexed"
+    assert result_second["status"] == "indexed"
+    assert meta.count_documents() == 2
+
+    first_doc = meta.get_document_by_path(str(first.resolve()))
+    second_doc = meta.get_document_by_path(str(second.resolve()))
+    assert first_doc is not None
+    assert second_doc is not None
+    assert first_doc["doc_id"] != second_doc["doc_id"]
+
+    doc_ids = {hit["doc_id"] for hit in fts.search("marker_dup_123", top_k=10)}
+    assert doc_ids == {first_doc["doc_id"], second_doc["doc_id"]}
