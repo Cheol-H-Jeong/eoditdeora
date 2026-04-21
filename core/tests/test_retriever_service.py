@@ -52,6 +52,17 @@ async def test_search_records_query(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.mark.asyncio
+async def test_search_flags_empty_index(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(service_mod, "lexical_search", lambda *_a, **_k: [])
+    monkeypatch.setattr(service_mod, "_index_has_documents", lambda: False)
+
+    result = await service_mod.search("신규 설치", top_k=5, mode="search")
+
+    assert result["results"] == []
+    assert result["warning"] == "index_empty"
+
+
+@pytest.mark.asyncio
 async def test_ask_mode_includes_answer(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         service_mod,
@@ -83,6 +94,16 @@ async def test_search_with_non_positive_top_k_short_circuits(
 
     result = await service_mod.search("질의", top_k=0)
     assert result == {"query": "질의", "results": []}
+
+
+def test_index_has_documents_degrades_open_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    class BrokenMetaStore:
+        def __init__(self) -> None:
+            raise RuntimeError("meta unavailable")
+
+    monkeypatch.setattr(service_mod, "MetaStore", BrokenMetaStore)
+
+    assert service_mod._index_has_documents() is True
 
 
 @pytest.mark.asyncio

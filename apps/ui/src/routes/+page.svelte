@@ -342,7 +342,9 @@
       const r = await search(q, { ask, topK: 10 });
       if (ask) aiResponse = r;
       else contentResponse = r;
-      if (r.warning === "no_results") {
+      if (r.warning === "index_empty") {
+        warning = "아직 본문 색인이 비어 있습니다. 설정에서 문서 폴더를 추가하거나 첫 색인이 끝날 때까지 잠시 기다려주세요.";
+      } else if (r.warning === "no_results") {
         warning = "일치하는 문서가 없습니다. 본문 색인이 아직 진행 중일 수 있습니다.";
       } else if (r.warning === "search_backend_failed") {
         warning = `검색 엔진 오류: ${r.detail ?? "알 수 없음"}`;

@@ -70,6 +70,7 @@ async def test_search_mode_empty_returns_no_results_warning(
     monkeypatch.setattr(
         service_mod, "lexical_search", lambda q, *, top_k=20: []
     )
+    monkeypatch.setattr(service_mod, "_index_has_documents", lambda: True)
     out = await service_mod.search("nothing matches", mode="search")
     assert out["results"] == []
     assert out["warning"] == "no_results"

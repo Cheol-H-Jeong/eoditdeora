@@ -39,6 +39,7 @@ async def test_search_returns_structured_error_on_backend_crash(monkeypatch: pyt
 @pytest.mark.asyncio
 async def test_search_flags_empty_results(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(service_mod, "lexical_search", lambda *a, **k: [])
+    monkeypatch.setattr(service_mod, "_index_has_documents", lambda: True)
     payload = await service_mod.search("query", top_k=5, mode="search")
     assert payload["results"] == []
     assert payload["warning"] == "no_results"

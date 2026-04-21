@@ -22,10 +22,27 @@ from eoditdeora.api.rpc_server import RpcError
 from eoditdeora.retriever.hybrid import hybrid_search
 from eoditdeora.retriever.lexical import lexical_search
 from eoditdeora.retriever.rag import answer_strict
+from eoditdeora.storage.meta import MetaStore
 from eoditdeora.storage.history import HistoryStore
 from eoditdeora.utils.logging import get_logger
 
 log = get_logger(__name__)
+
+
+def _index_has_documents() -> bool:
+    """Best-effort check for whether any parsed documents exist."""
+    try:
+        meta = MetaStore()
+    except Exception as e:  # noqa: BLE001
+        log.warning("search_index_state_probe_failed", error=str(e))
+        return True
+    try:
+        return meta.count_documents() > 0
+    except Exception as e:  # noqa: BLE001
+        log.warning("search_index_state_probe_failed", error=str(e))
+        return True
+    finally:
+        meta.close()
 
 
 async def search(query: str, top_k: int = 10, mode: str = "search") -> dict[str, Any]:
@@ -71,7 +88,7 @@ async def search(query: str, top_k: int = 10, mode: str = "search") -> dict[str,
         # Distinguish "no matches" from "backend reported nothing because
         # the index is empty". The UI uses this to prompt the user to
         # add a root / wait for indexing to catch up.
-        payload["warning"] = "no_results"
+        payload["warning"] = "no_results" if _index_has_documents() else "index_empty"
 
     if mode == "ask":
         try:
