@@ -16,8 +16,10 @@ AppImage/MSI; in dev it's this very script with the right flags.
 from __future__ import annotations
 
 import os
+import shlex
 import sys
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 from eoditdeora.utils.logging import get_logger
 
@@ -213,12 +215,15 @@ def _status_windows() -> dict[str, object]:
 def _enable_macos(cmd: str) -> dict[str, str]:
     target = Path.home() / "Library" / "LaunchAgents" / f"{_APP_ID}.plist"
     target.parent.mkdir(parents=True, exist_ok=True)
+    argv = "".join(
+        f"    <string>{escape(part)}</string>\n" for part in _macos_program_arguments(cmd)
+    )
     plist = f"""<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
 <plist version=\"1.0\"><dict>
   <key>Label</key><string>{_APP_ID}</string>
   <key>ProgramArguments</key><array>
-    <string>{cmd}</string>
+{argv}\
     <string>--autostart</string>
   </array>
   <key>RunAtLoad</key><true/>
@@ -227,6 +232,18 @@ def _enable_macos(cmd: str) -> dict[str, str]:
 """
     target.write_text(plist, encoding="utf-8")
     return {"ok": "true", "platform": "macos", "path": str(target)}
+
+
+def _macos_program_arguments(cmd: str) -> list[str]:
+    """Convert the launcher command into LaunchAgent ProgramArguments.
+
+    Dev mode uses a quoted `python script.py` command string, which must be
+    split into separate argv entries. A bare executable path with spaces is
+    already a single launcher path and should stay intact.
+    """
+    if any(ch in cmd for ch in ('"', "'")):
+        return shlex.split(cmd)
+    return [cmd]
 
 
 def _disable_macos() -> dict[str, str]:

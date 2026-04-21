@@ -79,3 +79,36 @@ def test_current_launcher_falls_back_to_dev_script(monkeypatch):
 def test_linux_exec_command_preserves_prequoted_dev_command():
     cmd = '"/usr/bin/python3" "/tmp/my repo/scripts/run-desktop.py"'
     assert autostart_mod._linux_exec_command(cmd) == cmd
+
+
+def test_enable_macos_splits_quoted_dev_launcher(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(autostart_mod.sys, "platform", "darwin")
+    monkeypatch.setattr(autostart_mod.Path, "home", lambda: tmp_path)
+
+    dev_cmd = '"/usr/bin/python3" "/tmp/my repo/scripts/run-desktop.py"'
+    result = autostart_mod.enable(exec_cmd=dev_cmd)
+
+    plist_path = Path(result["path"])
+    content = plist_path.read_text(encoding="utf-8")
+    assert "<string>/usr/bin/python3</string>" in content
+    assert "<string>/tmp/my repo/scripts/run-desktop.py</string>" in content
+    assert f"<string>{dev_cmd}</string>" not in content
+    assert content.count("<string>--autostart</string>") == 1
+
+
+def test_enable_macos_preserves_bare_path_with_spaces(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(autostart_mod.sys, "platform", "darwin")
+    monkeypatch.setattr(autostart_mod.Path, "home", lambda: tmp_path)
+
+    app_path = "/Applications/My Apps/Eoditdeora.app/Contents/MacOS/Eoditdeora"
+    result = autostart_mod.enable(exec_cmd=app_path)
+
+    content = Path(result["path"]).read_text(encoding="utf-8")
+    assert f"<string>{app_path}</string>" in content
+    assert content.count("<string>--autostart</string>") == 1
