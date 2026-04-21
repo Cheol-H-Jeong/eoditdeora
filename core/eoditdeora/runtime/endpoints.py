@@ -227,6 +227,8 @@ def _classify_auth_post(
         return "auth_required"
     if r.status_code == 404:
         return "endpoint_not_found"
+    if r.status_code >= 500:
+        return f"http_{r.status_code}"
     return None
 
 

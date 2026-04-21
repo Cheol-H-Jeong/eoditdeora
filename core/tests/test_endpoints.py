@@ -230,6 +230,16 @@ def test_probe_accepts_400_bad_body_on_chat(patched_httpx):
     assert p.error is None
 
 
+def test_probe_rejects_chat_5xx_as_unreachable(patched_httpx):
+    patched_httpx({
+        ("GET", "http://127.0.0.1:8080/v1/models"): _resp({"data": [{"id": "m"}]}),
+        ("POST", "http://127.0.0.1:8080/v1/chat/completions"): httpx.Response(503),
+    })
+    p = ep_mod.probe("http://127.0.0.1:8080")
+    assert p.reachable is False
+    assert p.error == "http_503"
+
+
 def test_probe_200_non_json_is_not_reachable(patched_httpx):
     patched_httpx({
         ("GET", "http://127.0.0.1:8080/v1/models"): httpx.Response(200, text="<html>login</html>")
