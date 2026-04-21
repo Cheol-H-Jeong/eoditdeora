@@ -171,7 +171,12 @@ export async function docpathsAddDefaults(): Promise<{ added: string[]; skipped:
   return rpc("docpaths.add_defaults");
 }
 
-export async function addRoot(path: string): Promise<{ ok: boolean; path?: string; error?: string }> {
+export async function addRoot(path: string): Promise<{
+  ok: boolean;
+  path?: string;
+  error?: string;
+  existing_root?: string;
+}> {
   return rpc("index.add_root", { path });
 }
 

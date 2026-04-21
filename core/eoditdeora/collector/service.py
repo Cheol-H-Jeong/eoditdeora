@@ -12,6 +12,18 @@ from eoditdeora.utils.paths_util import normalize_path
 log = get_logger(__name__)
 
 
+def _is_same_or_descendant(path: Path, candidate_root: Path) -> bool:
+    return path == candidate_root or candidate_root in path.parents
+
+
+def _find_overlapping_root(path: Path, roots: list[Path]) -> Path | None:
+    for root in roots:
+        resolved = root.resolve()
+        if _is_same_or_descendant(path, resolved) or _is_same_or_descendant(resolved, path):
+            return resolved
+    return None
+
+
 async def add_root(path: str) -> dict[str, Any]:
     abs_path = normalize_path(path)
     if not abs_path.exists() or not abs_path.is_dir():
@@ -19,8 +31,17 @@ async def add_root(path: str) -> dict[str, Any]:
 
     settings = load_settings()
     roots = [Path(r) for r in settings.index.roots]
-    if abs_path in [r.resolve() for r in roots]:
+    resolved_roots = [r.resolve() for r in roots]
+    if abs_path in resolved_roots:
         return {"ok": True, "already_registered": True, "path": str(abs_path)}
+    overlap = _find_overlapping_root(abs_path, roots)
+    if overlap is not None:
+        return {
+            "ok": False,
+            "error": "overlaps_existing_root",
+            "path": str(abs_path),
+            "existing_root": str(overlap),
+        }
     settings.index.roots.append(str(abs_path))
     save_settings(settings)
     log.info("root_added", path=str(abs_path))

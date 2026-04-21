@@ -40,6 +40,42 @@ async def test_add_root_is_idempotent(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_add_root_rejects_child_of_existing_root(tmp_path: Path):
+    child = tmp_path / "team"
+    child.mkdir()
+    await add_root(str(tmp_path))
+
+    result = await add_root(str(child))
+
+    assert result == {
+        "ok": False,
+        "error": "overlaps_existing_root",
+        "path": str(child.resolve()),
+        "existing_root": str(tmp_path.resolve()),
+    }
+    s = load_settings()
+    assert s.index.roots == [str(tmp_path.resolve())]
+
+
+@pytest.mark.asyncio
+async def test_add_root_rejects_parent_of_existing_root(tmp_path: Path):
+    child = tmp_path / "team"
+    child.mkdir()
+    await add_root(str(child))
+
+    result = await add_root(str(tmp_path))
+
+    assert result == {
+        "ok": False,
+        "error": "overlaps_existing_root",
+        "path": str(tmp_path.resolve()),
+        "existing_root": str(child.resolve()),
+    }
+    s = load_settings()
+    assert s.index.roots == [str(child.resolve())]
+
+
+@pytest.mark.asyncio
 async def test_remove_root(tmp_path: Path):
     await add_root(str(tmp_path))
     r = await remove_root(str(tmp_path))

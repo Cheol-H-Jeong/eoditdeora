@@ -65,6 +65,7 @@
   let docCandidates = $state<DocPathCandidate[]>([]);
   let fastStats = $state<FastStats | null>(null);
   let diskUsage = $state<IndexDiskUsage | null>(null);
+  let rootMsg = $state<string>("");
   let rescanMsg = $state<string>("");
   let resetMsg = $state<string>("");
 
@@ -292,9 +293,21 @@
     const p = newPath.trim();
     if (!p) return;
     busy = { ...busy, add: true };
+    rootMsg = "";
     try {
       const result = await addRoot(p);
-      if (result.ok) newPath = "";
+      if (result.ok) {
+        newPath = "";
+        rootMsg = result.path ? `감시 폴더를 추가했습니다: ${result.path}` : "감시 폴더를 추가했습니다.";
+      } else if (result.error === "not_a_directory") {
+        rootMsg = "폴더 경로를 입력하세요.";
+      } else if (result.error === "overlaps_existing_root") {
+        rootMsg = result.existing_root
+          ? `이미 겹치는 감시 폴더가 있습니다: ${result.existing_root}`
+          : "이미 겹치는 감시 폴더가 있습니다.";
+      } else {
+        rootMsg = "감시 폴더를 추가하지 못했습니다.";
+      }
       await refreshRuntime();
     } finally {
       busy = { ...busy, add: false };
@@ -477,6 +490,9 @@
         재탐색
       </button>
     </div>
+    {#if rootMsg}
+      <p class="hint small">{rootMsg}</p>
+    {/if}
     {#if rescanMsg}
       <p class="hint small">{rescanMsg}</p>
     {/if}
