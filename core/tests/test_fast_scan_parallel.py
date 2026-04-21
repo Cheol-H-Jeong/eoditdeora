@@ -123,3 +123,22 @@ def test_scan_root_abort_skips_partial_flush(tmp_path: Path):
 
     assert seen == 0
     assert upserted == 0
+
+
+def test_scan_root_includes_hidden_directories_not_ignored(tmp_path: Path):
+    root = tmp_path / "docs"
+    hidden = root / ".workspace"
+    hidden.mkdir(parents=True)
+    target = hidden / "meeting-notes.txt"
+    target.write_text("x", encoding="utf-8")
+
+    seen, upserted = scan_root(root, {".txt"}, 0)
+
+    idx = FastIndex()
+    try:
+        paths = {row.path for row in idx.search("meeting-notes", limit=20)}
+    finally:
+        idx.close()
+
+    assert (seen, upserted) == (1, 1)
+    assert str(target.resolve()) in paths

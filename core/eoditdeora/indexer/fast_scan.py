@@ -49,9 +49,13 @@ _SKIP_DIRS = {
 _SUBROOT_DONE = object()
 
 
-def _prune_dirnames(dirnames: list[str]) -> None:
+def _should_skip_dir(path: Path, matcher: IgnoreMatcher) -> bool:
+    return path.name in _SKIP_DIRS or matcher.ignored(path)
+
+
+def _prune_dirnames(dirpath: Path, dirnames: list[str], matcher: IgnoreMatcher) -> None:
     dirnames[:] = [
-        d for d in dirnames if d not in _SKIP_DIRS and not d.startswith(".")
+        d for d in dirnames if not _should_skip_dir(dirpath / d, matcher)
     ]
 
 
@@ -70,7 +74,8 @@ def _walk_subroot(
         for dirpath, dirnames, filenames in os.walk(subroot, followlinks=False):
             if should_abort():
                 break
-            _prune_dirnames(dirnames)
+            current = Path(dirpath)
+            _prune_dirnames(current, dirnames, matcher)
             for name in filenames:
                 if should_abort():
                     break
@@ -151,8 +156,9 @@ def _scan_root_impl(
                     aborted = True
                     break
                 if entry.is_dir(follow_symlinks=False):
-                    if entry.name not in _SKIP_DIRS and not entry.name.startswith("."):
-                        subroots.append(Path(entry.path))
+                    entry_path = Path(entry.path)
+                    if not _should_skip_dir(entry_path, matcher):
+                        subroots.append(entry_path)
                     continue
                 if not entry.is_file(follow_symlinks=False):
                     continue
