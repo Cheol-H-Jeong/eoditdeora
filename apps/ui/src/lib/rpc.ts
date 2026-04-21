@@ -29,24 +29,87 @@ function roleLabel(role: unknown): string {
   }
 }
 
+function formatEndpointUrl(url: unknown): string {
+  if (typeof url !== "string" || !url.trim()) return "";
+  try {
+    const parsed = new URL(url);
+    return parsed.origin;
+  } catch {
+    return url;
+  }
+}
+
+function detailSuffix(detail: unknown): string {
+  if (typeof detail !== "string" || !detail.trim()) return "";
+  return ` 상세: ${detail.trim()}`;
+}
+
+function formatInvalidParamsMessage(error: RpcInvokeError): string | null {
+  const message = typeof error.message === "string" ? error.message.trim() : "";
+  if (!message) return null;
+
+  if (message === "params must be object") {
+    return "요청 형식이 올바르지 않습니다. 앱을 다시 실행한 뒤 다시 시도하세요.";
+  }
+  if (message === "missing 'path'") {
+    return "파일 경로가 비어 있어 열 수 없습니다.";
+  }
+  if (message === "confirm must be true") {
+    return "확인 절차가 누락되어 작업을 진행할 수 없습니다. 다시 시도하세요.";
+  }
+  if (message === "endpoint must be an object") {
+    return "서버 설정 형식이 올바르지 않습니다. 입력값을 다시 확인하세요.";
+  }
+  if (message.startsWith("unknown role:")) {
+    return "알 수 없는 서버 역할입니다. 앱을 새로고침한 뒤 다시 시도하세요.";
+  }
+  if (message.startsWith("invalid endpoint:")) {
+    return `서버 설정이 올바르지 않습니다. 주소와 모델 ID를 확인하세요.${detailSuffix(error.data?.detail)}`;
+  }
+  return null;
+}
+
 export function formatRpcError(error: unknown): string {
   if (isRpcInvokeError(error)) {
     const code = error.code;
     const role = roleLabel(error.data?.role);
+    const status = error.data?.status;
+    const endpoint = formatEndpointUrl(error.data?.url);
     if (code === -32010) {
       return `${role} 서버 API 키가 없거나 유효하지 않습니다. 설정에서 키를 확인하세요.`;
     }
     if (code === -32011) {
-      return `${role} 서버 주소 또는 모델 ID를 찾을 수 없습니다. 설정 값을 확인하세요.`;
+      const endpointHint = endpoint ? ` (${endpoint})` : "";
+      return `${role} 서버 주소 또는 모델 ID를 찾을 수 없습니다${endpointHint}. 설정 값을 확인하세요.`;
     }
     if (code === -32012) {
-      return `${role} 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인하세요.`;
+      const statusHint = typeof status === "number" ? ` (HTTP ${status})` : "";
+      const endpointHint = endpoint ? ` ${endpoint}` : "";
+      return `${role} 서버에 연결할 수 없습니다${statusHint}.${endpointHint} 서버가 실행 중인지 확인하세요.${detailSuffix(error.data?.detail)}`;
     }
     if (code === -32013) {
-      return `${role} 서버 응답 형식이 올바르지 않습니다. OpenAI 호환 API인지 확인하세요.`;
+      const endpointHint = endpoint ? ` (${endpoint})` : "";
+      return `${role} 서버 응답 형식이 올바르지 않습니다${endpointHint}. OpenAI 호환 API인지 확인하세요.`;
     }
     if (code === -32014) {
       return `${role} 서버 요청 한도에 걸렸습니다. 잠시 후 다시 시도하거나 동시 요청 수를 줄이세요.`;
+    }
+    if (code === -32700) {
+      return "앱과 백엔드 사이의 통신 형식이 손상되었습니다. 앱을 다시 실행하세요.";
+    }
+    if (code === -32600) {
+      return "백엔드 요청 형식이 올바르지 않습니다. 앱을 다시 실행한 뒤 재시도하세요.";
+    }
+    if (code === -32601) {
+      return "앱과 백엔드 버전이 맞지 않아 요청을 처리할 수 없습니다. 최신 빌드로 다시 실행하세요.";
+    }
+    if (code === -32602) {
+      const mapped = formatInvalidParamsMessage(error);
+      if (mapped) return mapped;
+      return "입력값이 올바르지 않습니다. 설정과 요청 내용을 다시 확인하세요.";
+    }
+    if (code === -32603) {
+      return `내부 오류가 발생했습니다. 잠시 후 다시 시도하세요.${detailSuffix(error.data?.detail)}`;
     }
     if (typeof error.message === "string" && error.message.trim()) {
       return error.message;
