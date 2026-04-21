@@ -287,6 +287,13 @@ def index_file(
         log.warning("parser_empty_file", path=str(path))
         return {"status": "skipped", "reason": "empty", "path": str(path)}
 
+    if (
+        existing
+        and existing["mtime_ns"] == current_stat.st_mtime_ns
+        and existing["size_bytes"] == current_size
+    ):
+        return {"status": "unchanged", "path": str(path)}
+
     doc_id = _doc_id_for(
         path,
         meta=meta,

@@ -72,6 +72,29 @@ def test_reindex_same_file_is_noop(tmp_path: Path, stores):
     assert meta.count_documents() == 1
 
 
+def test_reindex_same_file_skips_content_hash_for_unchanged_file(
+    tmp_path: Path,
+    stores,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    meta, fts, vec = stores
+    src = tmp_path / "note.txt"
+    src.write_text("내용", encoding="utf-8")
+    cf = _make_cf(src)
+    result = index_file(cf, meta=meta, fts=fts, vectors=vec)
+    assert result["status"] == "indexed"
+
+    def _unexpected_hash(*_args, **_kwargs):
+        raise AssertionError("unchanged files should not recompute content hashes")
+
+    monkeypatch.setattr(pipeline, "_content_doc_id_for", _unexpected_hash)
+
+    repeat = index_file(_make_cf(src), meta=meta, fts=fts, vectors=vec)
+
+    assert repeat["status"] == "unchanged"
+    assert meta.count_documents() == 1
+
+
 def test_content_change_replaces_chunks(tmp_path: Path, stores):
     meta, fts, vec = stores
     src = tmp_path / "note.txt"
