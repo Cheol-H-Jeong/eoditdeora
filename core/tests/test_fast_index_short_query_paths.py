@@ -27,3 +27,27 @@ def test_short_query_matches_full_path_when_filename_does_not(tmp_path: Path):
     rows = idx.search("tf")
 
     assert [row.path for row in rows] == ["/shared/tf/roadmap.txt"]
+
+
+def test_short_query_expands_office_synonyms_for_filename_search(tmp_path: Path):
+    idx = FastIndex(db_path=tmp_path / "fast.db")
+    idx.upsert_many([
+        ("/docs/2026_예산안_초안.hwpx", 1, 100.0),
+        ("/docs/회의록.hwpx", 1, 90.0),
+    ])
+
+    rows = idx.search("예산")
+
+    assert [row.path for row in rows] == ["/docs/2026_예산안_초안.hwpx"]
+
+
+def test_long_query_expands_office_synonyms_for_filename_search(tmp_path: Path):
+    idx = FastIndex(db_path=tmp_path / "fast.db")
+    idx.upsert_many([
+        ("/docs/연차계획서.docx", 1, 100.0),
+        ("/docs/출장보고서.docx", 1, 90.0),
+    ])
+
+    rows = idx.search("휴가")
+
+    assert [row.path for row in rows] == ["/docs/연차계획서.docx"]

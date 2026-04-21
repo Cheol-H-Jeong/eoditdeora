@@ -25,6 +25,7 @@ from typing import Any
 
 from eoditdeora.config.paths import get_paths
 from eoditdeora.storage.schema_version import CURRENT_SCHEMA_VERSION, ensure_version
+from eoditdeora.utils.query_terms import expand_search_terms
 from eoditdeora.utils.logging import get_logger
 
 log = get_logger(__name__)
@@ -295,6 +296,7 @@ class FastIndex:
         if not q:
             return []
         safe_limit = max(0, int(limit))
+        terms = expand_search_terms([q])
 
         use_like = len(q) < 3
         params: list[Any] = []
@@ -302,14 +304,20 @@ class FastIndex:
             sql = (
                 "SELECT path, name, parent, size, mtime, ext "
                 "FROM files WHERE ("
-                "name LIKE ? ESCAPE '\\' "
-                "OR parent LIKE ? ESCAPE '\\' "
-                "OR path LIKE ? ESCAPE '\\'"
-                ")"
             )
-            like = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            like_pattern = f"%{like}%"
-            params.extend([like_pattern, like_pattern, like_pattern])
+            like_clauses: list[str] = []
+            for term in terms:
+                like = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                like_pattern = f"%{like}%"
+                like_clauses.append(
+                    "("
+                    "name LIKE ? ESCAPE '\\' "
+                    "OR parent LIKE ? ESCAPE '\\' "
+                    "OR path LIKE ? ESCAPE '\\'"
+                    ")"
+                )
+                params.extend([like_pattern, like_pattern, like_pattern])
+            sql += " OR ".join(like_clauses) + ")"
             if exts:
                 placeholders = ",".join("?" for _ in exts)
                 sql += f" AND ext IN ({placeholders})"
@@ -321,7 +329,7 @@ class FastIndex:
             # tokenizer would treat hyphens / dots as punctuation
             # boundaries, dropping matches like `2025-report` when the
             # user types `report`.
-            fts_q = '"' + q.replace('"', '""') + '"'
+            fts_q = " OR ".join('"' + term.replace('"', '""') + '"' for term in terms)
             params.append(fts_q)
             sql = (
                 "SELECT f.path, f.name, f.parent, f.size, f.mtime, f.ext "

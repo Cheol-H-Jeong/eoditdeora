@@ -3,18 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from eoditdeora.storage.tokenize import kiwi_tokenize_for_query
+from eoditdeora.utils.query_terms import expand_search_terms
 
 _TANTIVY_SPECIALS = set(r'+-&|!(){}[]^"~*?:\/')
-_SYNONYM_MAP = {
-    "예산": ("예산안",),
-    "예산안": ("예산",),
-    "품의": ("기안",),
-    "기안": ("품의",),
-    "품의서": ("기안서",),
-    "기안서": ("품의서",),
-    "휴가": ("연차",),
-    "연차": ("휴가",),
-}
 
 
 @dataclass(slots=True)
@@ -23,26 +14,6 @@ class ParsedQuery:
     phrases: list[str]
     negative_terms: list[str]
     negative_phrases: list[str]
-
-
-def expand_search_terms(terms: list[str]) -> list[str]:
-    """Add conservative office-document synonyms while preserving order."""
-    expanded: list[str] = []
-    seen: set[str] = set()
-    for term in terms:
-        norm = term.strip()
-        if not norm:
-            continue
-        if norm not in seen:
-            seen.add(norm)
-            expanded.append(norm)
-        for synonym in _SYNONYM_MAP.get(norm, ()):
-            if synonym not in seen:
-                seen.add(synonym)
-                expanded.append(synonym)
-    return expanded
-
-
 def _tokenize_terms(raw_terms: list[str], *, expand: bool) -> list[str]:
     seen: set[str] = set()
     tokenized: list[str] = []
