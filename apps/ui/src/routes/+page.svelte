@@ -34,10 +34,12 @@
   let stats = $state<FastStats | null>(null);
   let errorMessage = $state<string | null>(null);
   let warning = $state<string | null>(null);
+  let copyFeedback = $state<string | null>(null);
   let version = $state<string>("");
   let showSidebar = $state(false);
   let inputEl: HTMLInputElement | undefined = $state();
   let debounceTimer: number | undefined;
+  let copyFeedbackTimer: number | undefined;
 
   // Keyboard-nav: selectedIndex is shared across tabs and always
   // points into the currently-visible result list.
@@ -95,8 +97,58 @@
     if (progressTimer) window.clearInterval(progressTimer);
     if (healthTimer) window.clearInterval(healthTimer);
     if (debounceTimer) window.clearTimeout(debounceTimer);
+    if (copyFeedbackTimer) window.clearTimeout(copyFeedbackTimer);
     window.removeEventListener("keydown", onGlobalKeydown);
   });
+
+  function selectedPath(): string | null {
+    const results = currentResults();
+    if (selectedIndex < 0 || selectedIndex >= results.length) return null;
+    return results[selectedIndex].path;
+  }
+
+  function showCopyFeedback(message: string) {
+    copyFeedback = message;
+    if (copyFeedbackTimer !== undefined) {
+      window.clearTimeout(copyFeedbackTimer);
+    }
+    copyFeedbackTimer = window.setTimeout(() => {
+      copyFeedback = null;
+      copyFeedbackTimer = undefined;
+    }, 1800) as unknown as number;
+  }
+
+  async function writeClipboard(text: string): Promise<void> {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    textarea.style.pointerEvents = "none";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const copied = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    if (!copied) {
+      throw new Error("clipboard unavailable");
+    }
+  }
+
+  async function copySelectedPath() {
+    const path = selectedPath();
+    if (!path) return;
+    try {
+      await writeClipboard(path);
+      errorMessage = null;
+      showCopyFeedback(`경로 복사됨: ${basename(path)}`);
+    } catch (e) {
+      errorMessage = `경로를 복사하지 못했습니다. ${formatRpcError(e)}`;
+    }
+  }
 
   function onGlobalKeydown(e: KeyboardEvent) {
     // Power-user chords. Use metaKey (Cmd) on macOS, ctrlKey elsewhere.
@@ -111,6 +163,13 @@
     if (mod && e.key === ",") {
       e.preventDefault();
       showSidebar = !showSidebar;
+      return;
+    }
+    if (mod && e.shiftKey && e.key.toLowerCase() === "c") {
+      const path = selectedPath();
+      if (!path) return;
+      e.preventDefault();
+      void copySelectedPath();
       return;
     }
     if (mod && (e.key === "1" || e.key === "2" || e.key === "3")) {
@@ -464,6 +523,9 @@
     {#if warning}
       <div class="warning">{warning}</div>
     {/if}
+    {#if copyFeedback}
+      <div class="status">{copyFeedback}</div>
+    {/if}
     {#if bootPending()}
       <div class="progress boot" role="status" aria-live="polite">
         <span class="spinner"></span>
@@ -511,6 +573,7 @@
       {:else if !query.trim()}
         <div class="hint-panel">
           <p>👆 검색어를 입력하면 PC에 있는 문서 파일명을 즉시 찾습니다.</p>
+          <p class="small">선택된 결과는 ⌘/Ctrl+Shift+C로 경로를 복사할 수 있습니다.</p>
           {#if stats && stats.total > 0}
             <p class="small">현재 색인된 파일: <strong>{stats.total.toLocaleString()}</strong>개</p>
             {#if stats.by_ext.length}
@@ -587,7 +650,7 @@
       {:else if !query.trim()}
         <div class="hint-panel">
           <p>📄 문서 본문에서 키워드를 찾습니다. BM25 렉시컬 검색 — AI 서버가 꺼져있어도 즉답.</p>
-          <p class="small">Enter 또는 탭 전환으로 실행됩니다.</p>
+          <p class="small">Enter로 검색, ⌘/Ctrl+Shift+C로 선택된 결과 경로 복사.</p>
         </div>
       {/if}
     {:else if mode === "ai"}
