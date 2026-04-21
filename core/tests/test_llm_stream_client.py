@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from eoditdeora.api.rpc_server import (
+    ERR_UPSTREAM_BAD_REQUEST,
     ERR_UPSTREAM_BAD_RESPONSE,
     ERR_UPSTREAM_RATE_LIMIT,
     ERR_UPSTREAM_UNAVAILABLE,
@@ -168,6 +169,23 @@ def test_chat_stream_surfaces_rate_limit(monkeypatch: pytest.MonkeyPatch):
     assert ei.value.code == ERR_UPSTREAM_RATE_LIMIT
     assert ei.value.data is not None
     assert ei.value.data.get("detail") == "too many requests"
+
+
+def test_chat_stream_surfaces_bad_request(monkeypatch: pytest.MonkeyPatch):
+    def fake_stream(_method: str, _url: str, **_kwargs):
+        return _MockStreamResponse(
+            [],
+            status_code=400,
+            json_data={"error": {"message": "model is required"}},
+        )
+
+    monkeypatch.setattr(httpx, "stream", fake_stream)
+    client = LlmClient("127.0.0.1", 0)
+
+    with pytest.raises(RpcError) as ei:
+        list(client.chat_stream("sys", "usr"))
+    assert ei.value.code == ERR_UPSTREAM_BAD_REQUEST
+    assert "모델 ID" in ei.value.message
 
 
 def test_chat_stream_retries_transient_http_5xx_then_succeeds(

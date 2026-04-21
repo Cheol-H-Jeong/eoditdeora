@@ -20,6 +20,7 @@ import httpx
 
 from eoditdeora.api.rpc_server import (
     ERR_UPSTREAM_AUTH,
+    ERR_UPSTREAM_BAD_REQUEST,
     ERR_UPSTREAM_BAD_RESPONSE,
     ERR_UPSTREAM_NOT_FOUND,
     ERR_UPSTREAM_RATE_LIMIT,
@@ -153,6 +154,52 @@ def _raise_bad_response(url: str, role: str, detail: str) -> None:
     )
 
 
+def _bad_request_message(role: str, detail: str) -> str:
+    role_label = {
+        "llm": "답변",
+        "embed": "임베딩",
+        "rerank": "재정렬",
+    }.get(role, "추론")
+    normalized = detail.lower()
+    if any(
+        token in normalized
+        for token in (
+            "context length",
+            "maximum context",
+            "max context",
+            "token limit",
+            "too many tokens",
+            "prompt is too long",
+            "requested tokens",
+            "maximum tokens",
+        )
+    ):
+        return (
+            f"{role_label} 서버가 요청 길이를 거부했습니다. "
+            "질문을 더 짧게 하거나 검색 범위를 줄인 뒤 다시 시도하세요."
+        )
+    if any(
+        token in normalized
+        for token in (
+            "model is required",
+            "model_id",
+            "model id",
+            "unknown model",
+            "no such model",
+            "model_not_found",
+            "model name",
+        )
+    ):
+        return (
+            f"{role_label} 서버의 모델 ID가 비어 있거나 올바르지 않습니다. "
+            "설정에서 모델 ID를 확인하세요."
+        )
+    return (
+        f"{role_label} 서버가 요청을 거부했습니다. "
+        "모델 ID, 요청 형식, OpenAI 호환 API 설정을 확인하세요."
+    )
+
+
 def _extract_llm_message_text(data: dict[str, Any], url: str) -> str:
     choices = data.get("choices")
     if not isinstance(choices, list) or not choices:
@@ -208,6 +255,12 @@ def _raise_upstream_for_status(r: httpx.Response, url: str, role: str) -> None:
         raise RpcError(
             ERR_UPSTREAM_RATE_LIMIT,
             "요청이 너무 많아 잠시 제한되었습니다",
+            data,
+        )
+    if 400 <= r.status_code < 500:
+        raise RpcError(
+            ERR_UPSTREAM_BAD_REQUEST,
+            _bad_request_message(role, detail),
             data,
         )
     if r.status_code >= 500:

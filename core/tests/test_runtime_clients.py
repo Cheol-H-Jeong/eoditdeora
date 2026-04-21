@@ -14,6 +14,7 @@ import pytest
 
 from eoditdeora.api.rpc_server import (
     ERR_UPSTREAM_AUTH,
+    ERR_UPSTREAM_BAD_REQUEST,
     ERR_UPSTREAM_BAD_RESPONSE,
     ERR_UPSTREAM_NOT_FOUND,
     ERR_UPSTREAM_RATE_LIMIT,
@@ -278,7 +279,7 @@ def test_llm_429_raises_rate_limit_after_retries(monkeypatch: pytest.MonkeyPatch
     assert attempts["count"] == 3
 
 
-def test_llm_400_generic_4xx_raises_unavailable():
+def test_llm_400_generic_4xx_raises_bad_request():
     def handler(_req: httpx.Request) -> httpx.Response:
         return httpx.Response(400, json={"error": {"message": "model is required"}})
 
@@ -286,9 +287,25 @@ def test_llm_400_generic_4xx_raises_unavailable():
     client._client = _mock_client(handler)  # type: ignore[attr-defined]
     with pytest.raises(RpcError) as ei:
         client.chat("s", "u")
-    assert ei.value.code == ERR_UPSTREAM_UNAVAILABLE
+    assert ei.value.code == ERR_UPSTREAM_BAD_REQUEST
     assert ei.value.data is not None
     assert ei.value.data.get("detail") == "model is required"
+    assert "모델 ID" in ei.value.message
+
+
+def test_llm_422_context_limit_raises_bad_request():
+    def handler(_req: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            422,
+            json={"error": {"message": "maximum context length exceeded"}},
+        )
+
+    client = LlmClient("127.0.0.1", 0)
+    client._client = _mock_client(handler)  # type: ignore[attr-defined]
+    with pytest.raises(RpcError) as ei:
+        client.chat("s", "u")
+    assert ei.value.code == ERR_UPSTREAM_BAD_REQUEST
+    assert "요청 길이" in ei.value.message
 
 
 def test_llm_5xx_plain_text_detail_is_preserved_after_retries(
