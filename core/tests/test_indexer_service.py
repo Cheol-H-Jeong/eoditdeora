@@ -1,15 +1,17 @@
-import pytest
-
+from eoditdeora.indexer.daemon import _prune_disallowed_content
 from eoditdeora.indexer.service import forget, index_summary
+from eoditdeora.storage.fts import FtsStore
 from eoditdeora.storage.meta import MetaStore
+from eoditdeora.storage.vectors import VectorStore
+import pytest
 import time
 
 
-def _seed(meta: MetaStore, doc_id: str, path: str) -> None:
+def _seed(meta: MetaStore, doc_id: str, path: str, *, root: str = "/tmp/root") -> None:
     meta.upsert_document(
         {
             "doc_id": doc_id,
-            "root": "/tmp/root",
+            "root": root,
             "source_path": path,
             "source_path_display": path,
             "format": "txt",
@@ -82,3 +84,28 @@ async def test_forget_unknown_path_is_noop():
     m.close()
     result = await forget(doc_ids=[], paths=["/does/not/exist"], entities=[])
     assert result["removed"] == 0
+
+
+def test_prune_disallowed_content_removes_body_index_rows(tmp_path):
+    meta = MetaStore(tmp_path / "meta.sqlite3")
+    fts = FtsStore(tmp_path / "tantivy")
+    vec = VectorStore(tmp_path / "lance")
+    try:
+        root = tmp_path / "root"
+        root.mkdir()
+        keep = root / "keep.txt"
+        drop = root / "drop.md"
+        _seed(meta, "sha256:" + "a" * 64, str(keep.resolve()), root=str(root.resolve()))
+        _seed(meta, "sha256:" + "b" * 64, str(drop.resolve()), root=str(root.resolve()))
+        removed = _prune_disallowed_content(
+            root,
+            {".txt"},
+            meta=meta,
+            fts=fts,
+            vectors=vec,
+        )
+        assert removed == 1
+        assert meta.get_document_by_path(str(keep.resolve())) is not None
+        assert meta.get_document_by_path(str(drop.resolve())) is None
+    finally:
+        meta.close()

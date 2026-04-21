@@ -74,6 +74,27 @@ async def test_search_returns_empty_for_blank_query():
 
 
 @pytest.mark.asyncio
+async def test_index_rescan_refreshes_daemon(monkeypatch: pytest.MonkeyPatch):
+    server = RpcServer()
+    seen = {"refresh": 0}
+
+    class _DummyDaemon:
+        def refresh_roots(self) -> None:
+            seen["refresh"] += 1
+
+    async def fake_rescan_all() -> dict[str, Any]:
+        return {"totals": {"roots": 0, "seen": 0, "upserted": 0}, "per_root": []}
+
+    monkeypatch.setattr("eoditdeora.indexer.fast_scan.rescan_all", fake_rescan_all)
+    monkeypatch.setattr("eoditdeora.indexer.daemon.get_daemon", lambda: _DummyDaemon())
+
+    resp = await _call(server, "index.rescan")
+
+    assert resp["result"]["totals"]["roots"] == 0
+    assert seen["refresh"] == 1
+
+
+@pytest.mark.asyncio
 async def test_search_non_positive_top_k_returns_no_results():
     server = RpcServer()
     resp = await _call(server, "search", {"query": "예산", "top_k": -1})

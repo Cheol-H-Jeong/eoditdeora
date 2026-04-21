@@ -40,11 +40,13 @@ class _Handler(FileSystemEventHandler):
         ignore: IgnoreMatcher,
         emit: Callable[[CollectedFile], None],
         max_bytes: int,
+        allowed_exts: set[str] | None = None,
     ) -> None:
         self._root = root
         self._ignore = ignore
         self._emit = emit
         self._max_bytes = max_bytes
+        self._allowed_exts = {e.lower() for e in (allowed_exts or set())}
 
     def _within_root(self, path: Path) -> bool:
         try:
@@ -59,6 +61,13 @@ class _Handler(FileSystemEventHandler):
         if not self._within_root(path):
             return False
         if self._ignore.ignored(path):
+            return False
+        return True
+
+    def _accept_content(self, path: Path) -> bool:
+        if not self._accept(path):
+            return False
+        if self._allowed_exts and path.suffix.lower() not in self._allowed_exts:
             return False
         return True
 
@@ -86,7 +95,7 @@ class _Handler(FileSystemEventHandler):
         if event.is_directory:
             return
         p = Path(event.src_path)
-        if not self._accept(p):
+        if not self._accept_content(p):
             return
         self._stat_emit(p, ChangeKind.CREATED)
 
@@ -94,7 +103,7 @@ class _Handler(FileSystemEventHandler):
         if event.is_directory:
             return
         p = Path(event.src_path)
-        if not self._accept(p):
+        if not self._accept_content(p):
             return
         self._stat_emit(p, ChangeKind.MODIFIED)
 
@@ -117,7 +126,7 @@ class _Handler(FileSystemEventHandler):
         src = Path(event.src_path)
         dst = Path(getattr(event, "dest_path", event.src_path))
         src_ok = self._accept(src)
-        dst_ok = self._accept(dst)
+        dst_ok = self._accept_content(dst)
         if src_ok and dst_ok:
             self._stat_emit(dst, ChangeKind.MOVED, previous=src)
             return
@@ -136,6 +145,7 @@ class Watcher:
         emit: Callable[[CollectedFile], None],
         ignore: IgnoreMatcher | None = None,
         max_bytes: int = 256 * 1024 * 1024,
+        allowed_exts: set[str] | None = None,
     ) -> None:
         self._root = root.resolve()
         self._emit = emit
@@ -143,6 +153,7 @@ class Watcher:
         self._observer: Observer | None = None
         self._lock = threading.Lock()
         self._max_bytes = max_bytes
+        self._allowed_exts = {e.lower() for e in (allowed_exts or set())}
 
     def start(self) -> None:
         with self._lock:
@@ -150,7 +161,13 @@ class Watcher:
                 return
             obs = Observer()
             obs.schedule(
-                _Handler(self._root, self._ignore, self._emit, self._max_bytes),
+                _Handler(
+                    self._root,
+                    self._ignore,
+                    self._emit,
+                    self._max_bytes,
+                    allowed_exts=self._allowed_exts,
+                ),
                 str(self._root),
                 recursive=True,
             )

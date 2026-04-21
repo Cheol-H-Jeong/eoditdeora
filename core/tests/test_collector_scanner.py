@@ -55,3 +55,12 @@ def test_scanner_with_custom_ignore(tmp_path: Path):
     matcher = IgnoreMatcher(tmp_path, extra_patterns=["*.log"])
     results = list(Scanner(tmp_path, ignore=matcher).walk())
     assert {r.path.name for r in results} == {"keep.txt"}
+
+
+def test_scanner_honors_allowed_extensions(tmp_path: Path):
+    (tmp_path / "keep.txt").write_text("k", encoding="utf-8")
+    (tmp_path / "drop.md").write_text("d", encoding="utf-8")
+
+    results = list(Scanner(tmp_path, allowed_exts={".txt"}).walk())
+
+    assert [r.path.name for r in results] == ["keep.txt"]

@@ -21,10 +21,12 @@ class Scanner:
         root: Path,
         ignore: IgnoreMatcher | None = None,
         max_bytes: int = 256 * 1024 * 1024,
+        allowed_exts: set[str] | None = None,
     ) -> None:
         self._root = root.resolve()
         self._ignore = ignore or IgnoreMatcher(self._root)
         self._max_bytes = max_bytes
+        self._allowed_exts = {e.lower() for e in (allowed_exts or set())}
 
     def walk(self) -> Iterator[CollectedFile]:
         """Yield one record per file. Always uses CREATED; the indexer
@@ -42,6 +44,9 @@ class Scanner:
             for name in filenames:
                 p = current / name
                 if self._ignore.ignored(p):
+                    continue
+                ext = p.suffix.lower()
+                if self._allowed_exts and ext not in self._allowed_exts:
                     continue
                 try:
                     if not p.is_file():

@@ -259,6 +259,13 @@ class MetaStore:
         row = cur.fetchone()
         return dict(row) if row else None
 
+    def list_documents_under_root(self, root: str) -> list[dict[str, Any]]:
+        cur = self._conn.execute(
+            "SELECT doc_id, source_path, format FROM documents WHERE root = ?",
+            (root,),
+        )
+        return [dict(row) for row in cur.fetchall()]
+
     def count_documents(self) -> int:
         cur = self._conn.execute("SELECT COUNT(*) AS n FROM documents")
         return int(cur.fetchone()["n"])

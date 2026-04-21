@@ -203,9 +203,12 @@ async def _index_rescan(_: dict[str, Any]) -> dict[str, Any]:
     outside the app. Walks each root and mirrors entries into the fast
     index; content indexing continues on its own schedule.
     """
+    from eoditdeora.indexer.daemon import get_daemon
     from eoditdeora.indexer.fast_scan import rescan_all
 
-    return await rescan_all()
+    result = await rescan_all()
+    get_daemon().refresh_roots()
+    return result
 
 
 async def _search(params: dict[str, Any]) -> dict[str, Any]:

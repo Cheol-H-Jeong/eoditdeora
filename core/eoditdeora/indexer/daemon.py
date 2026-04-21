@@ -42,6 +42,29 @@ log = get_logger(__name__)
 _Q_MAX = 10_000
 
 
+def _prune_disallowed_content(
+    root: Path,
+    allowed_exts: set[str],
+    *,
+    meta: MetaStore,
+    fts: FtsStore,
+    vectors: VectorStore,
+) -> int:
+    if not allowed_exts:
+        return 0
+    removed = 0
+    for row in meta.list_documents_under_root(str(root.resolve())):
+        source_path = Path(str(row["source_path"]))
+        if source_path.suffix.lower() in allowed_exts:
+            continue
+        doc_id = str(row["doc_id"])
+        meta.delete_document(doc_id)
+        fts.delete_doc(doc_id)
+        vectors.delete_doc(doc_id)
+        removed += 1
+    return removed
+
+
 class IndexerDaemon:
     """Long-running indexer. Safe to `start()` once; `stop()` is idempotent."""
 
@@ -128,6 +151,7 @@ class IndexerDaemon:
 
     def _boot_roots(self) -> None:
         settings = load_settings()
+        allowed_exts = {e.lower() for e in settings.index.extensions}
         for raw in settings.index.roots:
             root = Path(raw)
             if not root.is_dir():
@@ -140,6 +164,7 @@ class IndexerDaemon:
                     emit=self._enqueue,
                     ignore=matcher,
                     max_bytes=settings.index.max_file_bytes,
+                    allowed_exts=allowed_exts,
                 )
             )
             # Start the watcher BEFORE the catch-up scan so events that
@@ -148,7 +173,7 @@ class IndexerDaemon:
             # Schedule catch-up scan without blocking start().
             threading.Thread(
                 target=self._catch_up_scan,
-                args=(root, matcher, settings.index.max_file_bytes),
+                args=(root, matcher, settings.index.max_file_bytes, allowed_exts),
                 name=f"eddr-scan:{root.name}",
                 daemon=True,
             ).start()
@@ -168,20 +193,25 @@ class IndexerDaemon:
             log.warning("root_active_check_failed", root=str(root), error=str(e))
             return True
 
-    def _catch_up_scan(self, root: Path, matcher: IgnoreMatcher, max_bytes: int) -> None:
+    def _catch_up_scan(
+        self,
+        root: Path,
+        matcher: IgnoreMatcher,
+        max_bytes: int,
+        allowed_exts: set[str],
+    ) -> None:
         if not self._root_is_active(root):
             return
+        current_allowed_exts = self._load_allowed_exts() or allowed_exts
         # Fast-index walk first: single pass with zero parsing cost so
         # the name-search UI becomes responsive within seconds of a new
         # root being added, even on a 200k-file Documents tree.
         try:
             from eoditdeora.indexer.fast_scan import scan_root
 
-            settings = load_settings()
-            allowed = {e.lower() for e in settings.index.extensions}
             seen, up = scan_root(
                 root,
-                allowed,
+                current_allowed_exts,
                 max_bytes,
                 should_abort=lambda: not self._root_is_active(root),
             )
@@ -199,7 +229,27 @@ class IndexerDaemon:
 
         if not self._root_is_active(root):
             return
-        scanner = Scanner(root, ignore=matcher, max_bytes=max_bytes)
+        meta = MetaStore()
+        fts = FtsStore()
+        vectors = VectorStore()
+        try:
+            pruned = _prune_disallowed_content(
+                root,
+                current_allowed_exts,
+                meta=meta,
+                fts=fts,
+                vectors=vectors,
+            )
+        finally:
+            meta.close()
+        if pruned:
+            log.info("content_index_pruned_disallowed_exts", root=str(root), removed=pruned)
+        scanner = Scanner(
+            root,
+            ignore=matcher,
+            max_bytes=max_bytes,
+            allowed_exts=current_allowed_exts,
+        )
         count = 0
         for rec in scanner.walk():
             if not self._root_is_active(root):
