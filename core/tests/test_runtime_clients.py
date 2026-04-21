@@ -342,3 +342,27 @@ def test_llm_reasoning_content_fallback_qwen_style():
     client = LlmClient("127.0.0.1", 0)
     client._client = _mock_client(handler)  # type: ignore[attr-defined]
     assert client.chat("s", "u") == "chain of thought body"
+
+
+def test_llm_chat_joins_text_parts_from_content_array():
+    def handler(_req: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {"type": "output_text", "text": "첫 문장"},
+                                {"type": "text", "text": " 둘째 문장"},
+                            ],
+                        }
+                    }
+                ]
+            },
+        )
+
+    client = LlmClient("127.0.0.1", 0)
+    client._client = _mock_client(handler)  # type: ignore[attr-defined]
+    assert client.chat("s", "u") == "첫 문장 둘째 문장"

@@ -65,6 +65,24 @@ def test_chat_stream_uses_reasoning_fallback_fields(monkeypatch: pytest.MonkeyPa
     assert list(client.chat_stream("sys", "usr")) == ["생각 ", "정리"]
 
 
+def test_chat_stream_joins_text_parts_from_content_array(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def fake_stream(_method: str, _url: str, **_kwargs):
+        return _MockStreamResponse(
+            [
+                'data: {"choices":[{"delta":{"content":[{"type":"output_text","text":"첫 "},{"type":"text","text":"조각"}]}}]}',
+                'data: {"choices":[{"delta":{"content":[{"type":"text","text":" 둘째 조각"}]}}]}',
+                "data: [DONE]",
+            ]
+        )
+
+    monkeypatch.setattr(httpx, "stream", fake_stream)
+    client = LlmClient("127.0.0.1", 0)
+
+    assert list(client.chat_stream("sys", "usr")) == ["첫 조각", " 둘째 조각"]
+
+
 def test_chat_stream_stops_at_done(monkeypatch: pytest.MonkeyPatch):
     def fake_stream(_method: str, _url: str, **_kwargs):
         return _MockStreamResponse(

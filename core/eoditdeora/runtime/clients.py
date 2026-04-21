@@ -42,6 +42,30 @@ _INITIAL_RETRY_DELAY_SEC = 0.2
 _MAX_RETRY_DELAY_SEC = 1.0
 
 
+def _extract_text_from_part(part: Any) -> str:
+    if isinstance(part, str):
+        return part
+    if not isinstance(part, dict):
+        return ""
+    if isinstance(part.get("text"), str):
+        return part["text"]
+    if isinstance(part.get("content"), str):
+        return part["content"]
+    if isinstance(part.get("reasoning_content"), str):
+        return part["reasoning_content"]
+    if isinstance(part.get("reasoning"), str):
+        return part["reasoning"]
+    return ""
+
+
+def _coerce_text_content(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return "".join(_extract_text_from_part(part) for part in value)
+    return ""
+
+
 def _auth_headers(api_key: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
@@ -227,13 +251,15 @@ class LlmClient(_EndpointClient):
         # `content` with the actual answer in a sibling `reasoning` field
         # when token budget is tight. Fall back to that rather than
         # surfacing an empty string to the retriever.
-        content = msg.get("content") or ""
+        content = _coerce_text_content(msg.get("content"))
         # Different reasoning-model conventions: OpenAI o1 / gpt-oss use
         # `reasoning`, llama-server with Qwen reasoning uses
         # `reasoning_content`. Fall back to whichever is populated so
         # the caller doesn't silently receive an empty answer.
         if not content:
-            content = msg.get("reasoning_content") or msg.get("reasoning") or ""
+            content = _coerce_text_content(
+                msg.get("reasoning_content") or msg.get("reasoning")
+            )
         return str(content)
 
     def chat_stream(
@@ -290,11 +316,10 @@ class LlmClient(_EndpointClient):
                     if not choices:
                         continue
                     delta = choices[0].get("delta") or {}
-                    content = (
+                    content = _coerce_text_content(
                         delta.get("content")
                         or delta.get("reasoning_content")
                         or delta.get("reasoning")
-                        or ""
                     )
                     if content:
                         yield str(content)
