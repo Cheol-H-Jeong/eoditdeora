@@ -36,6 +36,24 @@ _DISK_USAGE_BUCKETS = (
 )
 
 
+def _normalize_extensions_param(raw: Any) -> list[str] | None:
+    if not isinstance(raw, list) or not raw:
+        return None
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in raw:
+        ext = str(value).strip().lower()
+        if not ext:
+            continue
+        if not ext.startswith("."):
+            ext = f".{ext}"
+        if ext == "." or ext in seen:
+            continue
+        seen.add(ext)
+        normalized.append(ext)
+    return normalized or None
+
+
 def _bucket_for_path(index_dir: Path, path: Path) -> str:
     rel = path.relative_to(index_dir)
     top = rel.parts[0] if rel.parts else ""
@@ -167,10 +185,7 @@ async def _files_search(params: dict[str, Any]) -> dict[str, Any]:
 
     query = str(params.get("query", "")).strip()
     limit = int(params.get("limit", 50))
-    exts_raw = params.get("exts")
-    exts: list[str] | None = None
-    if isinstance(exts_raw, list) and exts_raw:
-        exts = [str(e).lower() for e in exts_raw]
+    exts = _normalize_extensions_param(params.get("exts"))
     idx = FastIndex()
     try:
         rows = idx.search(query, limit=limit, exts=exts)

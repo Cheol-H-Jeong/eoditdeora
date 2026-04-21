@@ -116,6 +116,32 @@ async def test_files_search_negative_limit_returns_no_rows():
 
 
 @pytest.mark.asyncio
+async def test_files_search_normalizes_extension_filters():
+    idx = FastIndex()
+    try:
+        idx.upsert_many([
+            ("/x/report_a.hwpx", 1, 100.0),
+            ("/x/report_b.pdf", 1, 100.0),
+            ("/x/report_c.docx", 1, 100.0),
+        ])
+    finally:
+        idx.close()
+
+    server = RpcServer()
+    resp = await _call(
+        server,
+        "files.search",
+        {"query": "report", "exts": ["hwpx", ".pdf", "  ", ".PDF", "docx"]},
+    )
+
+    assert sorted(row["ext"] for row in resp["result"]["results"]) == [
+        ".docx",
+        ".hwpx",
+        ".pdf",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_forget_removes_records():
     server = RpcServer()
     resp = await _call(
