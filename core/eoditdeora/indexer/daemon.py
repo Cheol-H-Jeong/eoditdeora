@@ -125,6 +125,30 @@ class IndexerDaemon:
         self.stop()
         self.start()
 
+    def rescan_roots(self) -> None:
+        """Schedule non-disruptive catch-up scans for all active roots.
+
+        Unlike ``refresh_roots()``, this keeps the current worker and
+        watchers alive. That avoids a stop/start race where a long
+        parse or index commit in the old worker can overlap a freshly
+        started worker and stall progress reporting.
+        """
+        settings = load_settings()
+        allowed_exts = {e.lower() for e in settings.index.extensions}
+        for raw in settings.index.roots:
+            root = Path(raw)
+            if not root.is_dir():
+                log.warning("root_missing", path=str(root))
+                continue
+            matcher = IgnoreMatcher(root)
+            threading.Thread(
+                target=self._catch_up_scan,
+                args=(root, matcher, settings.index.max_file_bytes, allowed_exts),
+                name=f"eddr-rescan:{root.name}",
+                daemon=True,
+            ).start()
+        log.info("indexer_rescan_scheduled", roots=len(settings.index.roots))
+
     def stats(self) -> dict[str, int]:
         with self._lock:
             return dict(self._stats)

@@ -74,13 +74,13 @@ async def test_search_returns_empty_for_blank_query():
 
 
 @pytest.mark.asyncio
-async def test_index_rescan_refreshes_daemon(monkeypatch: pytest.MonkeyPatch):
+async def test_index_rescan_schedules_content_catch_up(monkeypatch: pytest.MonkeyPatch):
     server = RpcServer()
-    seen = {"refresh": 0}
+    seen = {"rescan": 0}
 
     class _DummyDaemon:
-        def refresh_roots(self) -> None:
-            seen["refresh"] += 1
+        def rescan_roots(self) -> None:
+            seen["rescan"] += 1
 
     async def fake_rescan_all() -> dict[str, Any]:
         return {"totals": {"roots": 0, "seen": 0, "upserted": 0}, "per_root": []}
@@ -91,7 +91,7 @@ async def test_index_rescan_refreshes_daemon(monkeypatch: pytest.MonkeyPatch):
     resp = await _call(server, "index.rescan")
 
     assert resp["result"]["totals"]["roots"] == 0
-    assert seen["refresh"] == 1
+    assert seen["rescan"] == 1
 
 
 @pytest.mark.asyncio

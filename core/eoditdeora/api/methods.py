@@ -216,13 +216,13 @@ async def _index_rescan(_: dict[str, Any]) -> dict[str, Any]:
 
     Used after the user broadens the extension set or removes files
     outside the app. Walks each root and mirrors entries into the fast
-    index; content indexing continues on its own schedule.
+    index, then schedules a non-disruptive content catch-up scan.
     """
     from eoditdeora.indexer.daemon import get_daemon
     from eoditdeora.indexer.fast_scan import rescan_all
 
     result = await rescan_all()
-    get_daemon().refresh_roots()
+    get_daemon().rescan_roots()
     return result
 
 
