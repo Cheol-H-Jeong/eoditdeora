@@ -242,7 +242,7 @@ class IndexerDaemon:
                     result = index_file(item, meta=meta, fts=fts, vectors=vectors)
                     with self._lock:
                         status = str(result.get("status", ""))
-                        if status == "indexed":
+                        if status in {"indexed", "moved"}:
                             self._stats["indexed"] += 1
                         elif status == "deleted":
                             self._stats["deleted"] += 1
@@ -264,6 +264,8 @@ def _mirror_fast_index(fast: FastIndex, item: CollectedFile, allowed_exts: set[s
     if item.change is ChangeKind.DELETED:
         fast.delete(item.path)
         return
+    if item.change is ChangeKind.MOVED and item.previous_path is not None:
+        fast.delete(item.previous_path)
     if allowed_exts and ext not in allowed_exts:
         # Unknown/unsupported extension: drop any stale row so the fast
         # index stops advertising a file the user explicitly removed

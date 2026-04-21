@@ -27,6 +27,7 @@ from typing import Any
 from eoditdeora.config.paths import get_paths
 from eoditdeora.storage.schema_version import CURRENT_SCHEMA_VERSION, ensure_version
 from eoditdeora.utils.logging import get_logger
+from eoditdeora.utils.paths_util import display_path
 
 log = get_logger(__name__)
 
@@ -205,6 +206,35 @@ class MetaStore:
     def delete_document(self, doc_id: str) -> None:
         with self.tx() as cur:
             cur.execute("DELETE FROM documents WHERE doc_id = ?", (doc_id,))
+
+    def replace_path(self, old_path: str, new_path: str) -> str | None:
+        """Move one document row to a new source path without changing doc_id."""
+        new_display = display_path(Path(new_path))
+        with self.tx() as cur:
+            cur.execute(
+                "SELECT doc_id FROM documents WHERE source_path = ?",
+                (old_path,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            doc_id = str(row["doc_id"])
+            cur.execute(
+                "SELECT doc_id FROM documents WHERE source_path = ?",
+                (new_path,),
+            )
+            existing = cur.fetchone()
+            if existing and str(existing["doc_id"]) != doc_id:
+                cur.execute("DELETE FROM documents WHERE doc_id = ?", (existing["doc_id"],))
+            cur.execute(
+                """
+                UPDATE documents
+                   SET source_path = ?, source_path_display = ?
+                 WHERE doc_id = ?
+                """,
+                (new_path, new_display, doc_id),
+            )
+            return doc_id
 
     def get_document_by_path(self, path: str) -> dict[str, Any] | None:
         cur = self._conn.execute(

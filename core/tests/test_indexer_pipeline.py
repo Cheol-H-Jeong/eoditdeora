@@ -136,3 +136,32 @@ def test_queued_jobs_appear_after_index(tmp_path: Path, stores):
     understand = meta.claim_job("understand")
     assert embed is not None
     assert understand is not None
+
+
+def test_moved_file_preserves_doc_id_and_updates_path(tmp_path: Path, stores):
+    meta, fts, vec = stores
+    src = tmp_path / "before.txt"
+    src.write_text("rename payload", encoding="utf-8")
+    index_file(_make_cf(src), meta=meta, fts=fts, vectors=vec)
+    original = meta.get_document_by_path(str(src.resolve()))
+    assert original is not None
+
+    time.sleep(0.01)
+    dst = tmp_path / "after.txt"
+    src.rename(dst)
+    moved = CollectedFile(
+        path=dst.resolve(),
+        root=tmp_path.resolve(),
+        size=dst.stat().st_size,
+        mtime_ns=dst.stat().st_mtime_ns,
+        change=ChangeKind.MOVED,
+        previous_path=src.resolve(),
+    )
+
+    result = index_file(moved, meta=meta, fts=fts, vectors=vec)
+
+    assert result["status"] == "moved"
+    current = meta.get_document_by_path(str(dst.resolve()))
+    assert current is not None
+    assert current["doc_id"] == original["doc_id"]
+    assert meta.get_document_by_path(str(src.resolve())) is None

@@ -15,14 +15,16 @@ from typing import Any
 import tantivy  # type: ignore[import-not-found]
 
 from eoditdeora.config.paths import get_paths
+from eoditdeora.retriever.query_parser import build_tantivy_query, parse_query
 from eoditdeora.storage.schema_version import CURRENT_SCHEMA_VERSION, ensure_version
-from eoditdeora.storage.tokenize import kiwi_tokenize, kiwi_tokenize_for_query
+from eoditdeora.storage.tokenize import kiwi_tokenize
 from eoditdeora.utils.logging import get_logger
 
 log = get_logger(__name__)
 
 
 _WRITER_HEAP = 50_000_000  # tantivy requires >= 15 MB per thread
+_FTS_SCHEMA_VERSION = CURRENT_SCHEMA_VERSION + 1
 
 
 def _schema() -> tantivy.Schema:
@@ -32,6 +34,9 @@ def _schema() -> tantivy.Schema:
     b.add_text_field("doc_id", stored=True, tokenizer_name="raw", fast=True)
     # Stored verbatim for snippet return but not searched (raw = exact whole-string).
     b.add_text_field("text", stored=True, tokenizer_name="raw")
+    # Phrase queries run against original text tokenized on whitespace, while
+    # lexical term queries keep using the Kiwi-pretokenized `tokens` field.
+    b.add_text_field("phrase_text", tokenizer_name="default")
     # `default` splits on unicode whitespace + lowercases. We feed it Kiwi-
     # tokenized input so the effective index is Korean-morpheme aware while
     # still riding the mature English-default tokenizer path.
@@ -48,7 +53,7 @@ class FtsStore:
         ensure_version(
             self._dir.parent,
             "fts",
-            CURRENT_SCHEMA_VERSION,
+            _FTS_SCHEMA_VERSION,
             self._rebuild_index,
         )
 
@@ -81,6 +86,7 @@ class FtsStore:
             doc.add_text("chunk_id", r["chunk_id"])
             doc.add_text("doc_id", r["doc_id"])
             doc.add_text("text", r["text"])
+            doc.add_text("phrase_text", r["text"])
             doc.add_text("tokens", tokens)
             writer.add_document(doc)
         writer.commit()
@@ -94,10 +100,10 @@ class FtsStore:
     def search(self, query_text: str, top_k: int = 50) -> list[dict[str, Any]]:
         index = self._open()
         index.reload()
-        tokens = kiwi_tokenize_for_query(query_text)
-        if not tokens:
+        parsed = parse_query(query_text)
+        q_str = build_tantivy_query(parsed)
+        if not q_str:
             return []
-        q_str = " ".join(tokens)
         searcher = index.searcher()
         query = index.parse_query(q_str, ["tokens"])
         results: list[dict[str, Any]] = []

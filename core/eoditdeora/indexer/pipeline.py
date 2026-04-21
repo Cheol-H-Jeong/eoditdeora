@@ -34,6 +34,8 @@ def index_file(
 
     Returns a small summary dict so the caller can log/telemetry.
     LLM work (embed/understand) is queued; it does not block this call.
+    MOVED events apply `previous_path` via `meta.replace_path` so renames
+    keep the existing doc_id when content is unchanged.
     """
     path = cf.path
 
@@ -46,6 +48,15 @@ def index_file(
             vectors.delete_doc(doc_id)
             log.info("indexed_delete", path=str(path))
         return {"status": "deleted", "path": str(path)}
+
+    if cf.change is ChangeKind.MOVED and cf.previous_path is not None:
+        moved_doc_id = meta.replace_path(str(cf.previous_path), str(path))
+        if moved_doc_id and path.exists() and path.is_file():
+            current_doc_id = _doc_id_for(path)
+            if current_doc_id == moved_doc_id:
+                existing = meta.get_document_by_path(str(path))
+                if existing and existing["mtime_ns"] == cf.mtime_ns:
+                    return {"status": "moved", "path": str(path), "previous_path": str(cf.previous_path)}
 
     if not path.exists() or not path.is_file():
         return {"status": "skipped_missing", "path": str(path)}

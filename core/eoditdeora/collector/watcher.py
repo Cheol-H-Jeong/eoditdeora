@@ -46,7 +46,18 @@ class _Handler(FileSystemEventHandler):
         self._emit = emit
         self._max_bytes = max_bytes
 
+    def _within_root(self, path: Path) -> bool:
+        try:
+            path.resolve().relative_to(self._root)
+        except ValueError:
+            return False
+        except OSError:
+            return False
+        return True
+
     def _accept(self, path: Path) -> bool:
+        if not self._within_root(path):
+            return False
         if self._ignore.ignored(path):
             return False
         return True
@@ -67,7 +78,7 @@ class _Handler(FileSystemEventHandler):
                 size=size,
                 mtime_ns=mtime_ns,
                 change=change,
-                previous_path=previous,
+                previous_path=previous.resolve() if previous else None,
             )
         )
 
@@ -96,14 +107,26 @@ class _Handler(FileSystemEventHandler):
         self._stat_emit(p, ChangeKind.DELETED)
 
     def on_moved(self, event: FileSystemEvent) -> None:
+        """Emit a single MOVED record when both endpoints stay in-root.
+
+        The indexing pipeline applies `previous_path` via `meta.replace_path`
+        so doc_id stays stable across a rename.
+        """
         if event.is_directory:
             return
         src = Path(event.src_path)
         dst = Path(getattr(event, "dest_path", event.src_path))
-        # Only accept if either endpoint is inside root.
-        if not (self._accept(src) or self._accept(dst)):
+        src_ok = self._accept(src)
+        dst_ok = self._accept(dst)
+        if src_ok and dst_ok:
+            self._stat_emit(dst, ChangeKind.MOVED, previous=src)
             return
-        self._stat_emit(dst, ChangeKind.MOVED, previous=src)
+        if src_ok:
+            self._stat_emit(src, ChangeKind.DELETED)
+            return
+        if not dst_ok:
+            return
+        self._stat_emit(dst, ChangeKind.CREATED)
 
 
 class Watcher:

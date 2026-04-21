@@ -29,6 +29,21 @@ _DROP_TAGS = frozenset(
     }
 )
 
+# Query-time only stopwords. Index-time tokens stay intact so stored text
+# and highlight behaviour are unaffected.
+_STOPWORDS = frozenset(
+    {
+        "의", "을", "를", "은", "는", "이", "가", "에", "에서", "에게",
+        "께", "도", "와", "과", "로", "으로", "만", "이나", "나", "부터",
+        "까지", "보다", "처럼", "같이", "마다", "조차", "마저", "뿐", "밖에",
+        "하고", "이며", "이며", "이고", "이다", "인", "the", "a", "an",
+        "and", "or", "but", "if", "then", "else", "for", "to", "of",
+        "in", "on", "at", "by", "with", "from", "as", "is", "are",
+        "was", "were", "be", "been", "being", "this", "that", "these",
+        "those", "it", "its", "into", "about", "over", "under",
+    }
+)
+
 
 @lru_cache(maxsize=1)
 def _get_kiwi():  # type: ignore[no-untyped-def]
@@ -61,4 +76,4 @@ def kiwi_tokenize(text: str) -> list[str]:
 def kiwi_tokenize_for_query(text: str) -> list[str]:
     """Same as kiwi_tokenize but we keep English as-is even if POS
     tagging mislabels it."""
-    return kiwi_tokenize(text)
+    return [tok for tok in kiwi_tokenize(text) if tok.lower() not in _STOPWORDS]

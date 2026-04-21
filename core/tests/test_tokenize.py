@@ -24,8 +24,7 @@ def test_kiwi_tokenize_numbers():
     assert "12000" in text or "12" in tokens or "12000" in tokens
 
 
-def test_query_tokenizer_matches_index_tokenizer():
-    # Keep index-side and query-side tokenization identical so BM25 recall
-    # is not poisoned by POS-tagging drift.
+def test_query_tokenizer_only_removes_query_stopwords():
     sentence = "김철수 과장이 예산 품의를 제출"
-    assert kiwi_tokenize(sentence) == kiwi_tokenize_for_query(sentence)
+    assert kiwi_tokenize(sentence) == ["김철수", "과장", "예산", "품", "르", "제출"]
+    assert kiwi_tokenize_for_query(sentence) == ["김철수", "과장", "예산", "품", "르", "제출"]
