@@ -287,9 +287,9 @@ class FastIndex:
         least one trigram, i.e. ≥3 chars. When the user types 1 or 2
         characters (very common in Korean — a single-syllable noun is
         one ASCII-width char) we fall back to a LIKE scan over the
-        `files.name` column. On a 200k-row index this LIKE query still
-        completes in ~30 ms on a modern SSD, which preserves the
-        "as-you-type" feel.
+        filename and path columns. This keeps the short-query behavior
+        aligned with the trigram path search so two-syllable folder
+        names still surface immediately.
         """
         q = (query or "").strip()
         if not q:
@@ -301,10 +301,15 @@ class FastIndex:
         if use_like:
             sql = (
                 "SELECT path, name, parent, size, mtime, ext "
-                "FROM files WHERE name LIKE ? ESCAPE '\\'"
+                "FROM files WHERE ("
+                "name LIKE ? ESCAPE '\\' "
+                "OR parent LIKE ? ESCAPE '\\' "
+                "OR path LIKE ? ESCAPE '\\'"
+                ")"
             )
             like = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            params.append(f"%{like}%")
+            like_pattern = f"%{like}%"
+            params.extend([like_pattern, like_pattern, like_pattern])
             if exts:
                 placeholders = ",".join("?" for _ in exts)
                 sql += f" AND ext IN ({placeholders})"
