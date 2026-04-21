@@ -187,7 +187,7 @@ export type SearchResponse = {
   answer?: {
     answered: boolean;
     answer: string;
-    citations: { index: number; source_path_display: string }[];
+    citations: { index: number; source_path?: string; source_path_display: string }[];
   };
 };
 

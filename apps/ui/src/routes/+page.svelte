@@ -150,12 +150,18 @@
     healthTimer = window.setInterval(tick, 10000) as unknown as number;
   }
 
+  function openablePath(path: string | null | undefined, display: string): string {
+    return path?.trim() || display;
+  }
+
   function currentResults(): Array<{ path: string }> {
     if (mode === "name") {
       return nameResults.map((r) => ({ path: r.path }));
     }
     const src = mode === "content" ? contentResponse : aiResponse;
-    return (src?.results ?? []).map((r) => ({ path: r.source_path_display }));
+    return (src?.results ?? []).map((r) => ({
+      path: openablePath(r.source_path, r.source_path_display),
+    }));
   }
 
   function clampSelection() {
@@ -558,7 +564,7 @@
               class="card"
               class:selected={i === selectedIndex}
               data-result-index={i}
-              onclick={() => void openPath(hit.source_path_display)}
+              onclick={() => void openPath(openablePath(hit.source_path, hit.source_path_display))}
             >
               <div class="title">
                 {hit.title || basename(hit.source_path_display)}
@@ -593,7 +599,10 @@
             <ol class="citations">
               {#each aiResponse.answer.citations as c}
                 <li>
-                  <button class="cite" onclick={() => void openPath(c.source_path_display)}>
+                  <button
+                    class="cite"
+                    onclick={() => void openPath(openablePath(c.source_path, c.source_path_display))}
+                  >
                     §{c.index} — {c.source_path_display}
                   </button>
                 </li>
@@ -609,7 +618,7 @@
               class="card"
               class:selected={i === selectedIndex}
               data-result-index={i}
-              onclick={() => void openPath(hit.source_path_display)}
+              onclick={() => void openPath(openablePath(hit.source_path, hit.source_path_display))}
             >
               <div class="title">
                 {hit.title || basename(hit.source_path_display)}
