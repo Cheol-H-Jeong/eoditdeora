@@ -58,12 +58,28 @@ class ModelSettings(BaseModel):
     llm_context_tokens: int = 32768
 
 
+_DEFAULT_INDEX_EXTENSIONS: list[str] = [
+    ".hwp", ".hwpx",
+    ".pdf",
+    ".doc", ".docx",
+    ".ppt", ".pptx",
+    ".xls", ".xlsx",
+    ".txt", ".md", ".markdown",
+    ".rtf", ".odt", ".ods", ".odp",
+]
+
+
 class IndexSettings(BaseModel):
     roots: list[str] = Field(default_factory=list)
     ignore_patterns: list[str] = Field(default_factory=list)
     max_file_bytes: int = 256 * 1024 * 1024  # 256 MB hard cap
     incremental_interval_sec: int = 30
     batch_understand_hour: int = 2  # 2am local time for heavy LLM batching
+    # Extension set for the fast (Everything-tier) file-name index.
+    # Content parsing pipeline honors the same list for deciding which
+    # files are worth the heavier extraction pass. Users can broaden
+    # this in Settings; broadening triggers a rescan of every root.
+    extensions: list[str] = Field(default_factory=lambda: list(_DEFAULT_INDEX_EXTENSIONS))
 
 
 class SearchSettings(BaseModel):

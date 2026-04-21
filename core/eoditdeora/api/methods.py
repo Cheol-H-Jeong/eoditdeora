@@ -31,6 +31,59 @@ async def _update_settings(params: dict[str, Any]) -> dict[str, Any]:
     return settings.model_dump(mode="json")
 
 
+async def _files_search(params: dict[str, Any]) -> dict[str, Any]:
+    """Everything-tier file-name search.
+
+    Intentionally cheap: <50 ms for tens of thousands of indexed files.
+    Returns raw paths + metadata so the UI can render instantly as the
+    user types. For body-text or semantic search, callers use the
+    `search` method with mode="search"/"ask".
+    """
+    from eoditdeora.storage.fast_index import FastIndex
+
+    query = str(params.get("query", "")).strip()
+    limit = int(params.get("limit", 50))
+    exts_raw = params.get("exts")
+    exts: list[str] | None = None
+    if isinstance(exts_raw, list) and exts_raw:
+        exts = [str(e).lower() for e in exts_raw]
+    idx = FastIndex()
+    try:
+        rows = idx.search(query, limit=limit, exts=exts)
+        return {
+            "query": query,
+            "results": [r.to_dict() for r in rows],
+            "total_indexed": idx.count(),
+        }
+    finally:
+        idx.close()
+
+
+async def _files_stats(_: dict[str, Any]) -> dict[str, Any]:
+    from eoditdeora.storage.fast_index import FastIndex
+
+    idx = FastIndex()
+    try:
+        return {
+            "total": idx.count(),
+            "by_ext": [{"ext": e, "count": n} for e, n in idx.stats_by_ext()],
+        }
+    finally:
+        idx.close()
+
+
+async def _index_rescan(_: dict[str, Any]) -> dict[str, Any]:
+    """Trigger a fast-index rescan of every registered root.
+
+    Used after the user broadens the extension set or removes files
+    outside the app. Walks each root and mirrors entries into the fast
+    index; content indexing continues on its own schedule.
+    """
+    from eoditdeora.indexer.fast_scan import rescan_all
+
+    return await rescan_all()
+
+
 async def _search(params: dict[str, Any]) -> dict[str, Any]:
     from eoditdeora.retriever.service import search as do_search
 
@@ -207,6 +260,39 @@ async def _endpoints_update(params: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "role": role, "endpoint": endpoint.model_dump(mode="json")}
 
 
+async def _docpaths_discover(_: dict[str, Any]) -> dict[str, Any]:
+    """Enumerate well-known document folders on this OS.
+
+    Returns every candidate (even non-existent ones) so the UI can show
+    a "not installed" badge for missing OneDrive etc. The UI filters
+    to `has_documents=True` for the default "add all" action but keeps
+    the rest as opt-in toggles.
+    """
+    from eoditdeora.runtime.docpath_discovery import discover
+
+    return {"candidates": [r.to_dict() for r in discover()]}
+
+
+async def _docpaths_add_defaults(_: dict[str, Any]) -> dict[str, Any]:
+    """Add every discovered root that contains documents.
+
+    Idempotent: already-registered roots are silently skipped by
+    `collector.add_root`.
+    """
+    from eoditdeora.collector.service import add_root
+    from eoditdeora.runtime.docpath_discovery import default_roots
+
+    added: list[str] = []
+    skipped: list[str] = []
+    for candidate in default_roots():
+        result = await add_root(candidate)
+        if result.get("ok"):
+            added.append(candidate)
+        else:
+            skipped.append(candidate)
+    return {"added": added, "skipped": skipped}
+
+
 async def _first_run_bootstrap(params: dict[str, Any]) -> dict[str, Any]:
     """Idempotent first-launch bootstrap.
 
@@ -228,12 +314,17 @@ async def _first_run_bootstrap(params: dict[str, Any]) -> dict[str, Any]:
     settings = load_settings()
 
     if not settings.index.roots:
-        for candidate in (Path.home() / "Documents", Path.home() / "문서"):
-            if candidate.is_dir():
-                result = await add_root(str(candidate))
-                if result.get("ok"):
-                    actions.append(f"added_root:{candidate}")
-                break
+        # Expanded first-run discovery: add every well-known doc folder
+        # on this platform that actually contains parseable documents.
+        # Previously we stopped at the first match (usually ~/Documents),
+        # missing Desktop / Downloads / OneDrive / 문서 where Korean
+        # office users keep most of their work.
+        from eoditdeora.runtime.docpath_discovery import default_roots
+
+        for candidate in default_roots():
+            result = await add_root(candidate)
+            if result.get("ok"):
+                actions.append(f"added_root:{candidate}")
 
     if not autostart_status().get("enabled"):
         enable_autostart()
@@ -258,6 +349,9 @@ def register_all(server: RpcServer) -> None:
     server.register("settings.get", _get_settings)
     server.register("settings.update", _update_settings)
     server.register("search", _search)
+    server.register("files.search", _files_search)
+    server.register("files.stats", _files_stats)
+    server.register("index.rescan", _index_rescan)
     server.register("index.add_root", _index_add_root)
     server.register("index.remove_root", _index_remove_root)
     server.register("index.status", _index_status)
@@ -265,6 +359,8 @@ def register_all(server: RpcServer) -> None:
     server.register("autostart.enable", _autostart_enable)
     server.register("autostart.disable", _autostart_disable)
     server.register("autostart.status", _autostart_status)
+    server.register("docpaths.discover", _docpaths_discover)
+    server.register("docpaths.add_defaults", _docpaths_add_defaults)
     server.register("endpoints.health", _endpoints_health)
     server.register("endpoints.discover", _endpoints_discover)
     server.register("endpoints.test", _endpoints_test)

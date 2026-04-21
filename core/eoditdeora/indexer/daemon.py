@@ -30,6 +30,7 @@ from eoditdeora.collector.scanner import Scanner
 from eoditdeora.collector.watcher import Watcher
 from eoditdeora.config import load_settings
 from eoditdeora.indexer.pipeline import index_file
+from eoditdeora.storage.fast_index import FastIndex
 from eoditdeora.storage.fts import FtsStore
 from eoditdeora.storage.meta import MetaStore
 from eoditdeora.storage.vectors import VectorStore
@@ -129,7 +130,28 @@ class IndexerDaemon:
                 daemon=True,
             ).start()
 
+    def _load_allowed_exts(self) -> set[str]:
+        """Fresh read of the extension allow-list from settings.toml."""
+        try:
+            return {e.lower() for e in load_settings().index.extensions}
+        except Exception as e:  # noqa: BLE001
+            log.warning("allowed_exts_reload_failed", error=str(e))
+            return set()
+
     def _catch_up_scan(self, root: Path, matcher: IgnoreMatcher, max_bytes: int) -> None:
+        # Fast-index walk first: single pass with zero parsing cost so
+        # the name-search UI becomes responsive within seconds of a new
+        # root being added, even on a 200k-file Documents tree.
+        try:
+            from eoditdeora.indexer.fast_scan import scan_root
+
+            settings = load_settings()
+            allowed = {e.lower() for e in settings.index.extensions}
+            seen, up = scan_root(root, allowed, max_bytes)
+            log.info("fast_index_warmup_done", root=str(root), seen=seen, upserted=up)
+        except Exception as e:  # noqa: BLE001
+            log.warning("fast_index_warmup_failed", root=str(root), error=str(e))
+
         scanner = Scanner(root, ignore=matcher, max_bytes=max_bytes)
         count = 0
         for rec in scanner.walk():
@@ -149,6 +171,20 @@ class IndexerDaemon:
         meta = MetaStore()
         fts = FtsStore()
         vectors = VectorStore()
+        # The fast (file-name) index is kept in lockstep with the heavy
+        # content pipeline: every CREATED/MODIFIED event upserts here
+        # even if the downstream parser fails. That way Everything-tier
+        # lookups keep working for all known files regardless of the
+        # content extraction success rate.
+        fast = FastIndex()
+        # Extension allow-list is re-read every N events (not once at
+        # worker start) so Settings changes take effect without
+        # restarting the daemon. A worker that froze `allowed_exts` at
+        # boot would keep mirroring the old set into the fast index
+        # even after the user broadens or narrows `index.extensions`.
+        allowed_exts = self._load_allowed_exts()
+        events_since_refresh = 0
+        EXTS_REFRESH_EVERY = 64
         # Small debounce: collapse bursts of MODIFIED events on the same
         # path (editors often save in multiple fsync cycles).
         last_seen: dict[str, float] = {}
@@ -168,6 +204,17 @@ class IndexerDaemon:
                     if now - last_seen.get(key, 0) < 0.4:
                         continue
                     last_seen[key] = now
+                # Mirror to the fast index first so name-search stays
+                # usable even if the heavy pipeline errors on this file.
+                events_since_refresh += 1
+                if events_since_refresh >= EXTS_REFRESH_EVERY:
+                    allowed_exts = self._load_allowed_exts()
+                    events_since_refresh = 0
+                try:
+                    _mirror_fast_index(fast, item, allowed_exts)
+                except Exception as e:  # noqa: BLE001
+                    log.debug("fast_index_mirror_failed", path=str(item.path), error=str(e))
+
                 try:
                     result = index_file(item, meta=meta, fts=fts, vectors=vectors)
                     with self._lock:
@@ -184,6 +231,22 @@ class IndexerDaemon:
                         self._stats["errors"] += 1
         finally:
             meta.close()
+            fast.close()
+
+
+def _mirror_fast_index(fast: FastIndex, item: CollectedFile, allowed_exts: set[str]) -> None:
+    ext = item.path.suffix.lower()
+    if item.change is ChangeKind.DELETED:
+        fast.delete(item.path)
+        return
+    if allowed_exts and ext not in allowed_exts:
+        # Unknown/unsupported extension: drop any stale row so the fast
+        # index stops advertising a file the user explicitly removed
+        # from their extension set.
+        fast.delete(item.path)
+        return
+    mtime = item.mtime_ns / 1_000_000_000 if item.mtime_ns else 0.0
+    fast.upsert(item.path, size=item.size, mtime=mtime)
 
 
 _singleton: IndexerDaemon | None = None

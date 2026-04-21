@@ -78,6 +78,14 @@ def _size_heuristic(model_id: str) -> float:
 
 
 def _candidates_from_probes(probes: Iterable[Probe]) -> list[Candidate]:
+    """Only fully-usable probes become auto-connect candidates.
+
+    A probe that lists models but failed the chat auth check
+    (`error == "auth_required"`) is *not* a candidate — assigning it
+    would persist a broken endpoint into settings.toml and the very
+    next query would 401. The user must supply an API key through
+    Settings before we treat it as usable.
+    """
     out: list[Candidate] = []
     for p in probes:
         if not p.reachable:
@@ -126,6 +134,10 @@ def auto_connect(force: bool = False) -> dict[str, object]:
     candidates = _candidates_from_probes(probes)
     actions: list[str] = []
     assigned: dict[str, dict[str, str]] = {}
+
+    for p in probes:
+        if p.error == "auth_required":
+            actions.append(f"skipped:auth_required@{p.base_url}")
 
     for role in ("llm", "embed", "rerank"):
         if role not in need:

@@ -16,6 +16,13 @@ from typing import Any
 
 import httpx
 
+from eoditdeora.api.rpc_server import (
+    ERR_UPSTREAM_AUTH,
+    ERR_UPSTREAM_BAD_RESPONSE,
+    ERR_UPSTREAM_NOT_FOUND,
+    ERR_UPSTREAM_UNAVAILABLE,
+    RpcError,
+)
 from eoditdeora.config import load_settings
 from eoditdeora.config.settings import EndpointConfig
 from eoditdeora.runtime.endpoints import (
@@ -30,6 +37,63 @@ log = get_logger(__name__)
 
 def _auth_headers(api_key: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {api_key}"} if api_key else {}
+
+
+def _raise_upstream_for_status(r: httpx.Response, url: str, role: str) -> None:
+    """Translate upstream HTTP errors into RpcError with helpful codes.
+
+    The UI dispatches on the RPC error code to render the right
+    remediation (e.g. "API 키가 필요합니다" vs "서버 응답 없음"), so
+    the classification happens here rather than being flattened into a
+    generic 'internal error' at the dispatcher.
+    """
+    if r.status_code < 400:
+        return
+    data: dict[str, Any] = {"url": url, "role": role, "status": r.status_code}
+    if r.status_code in (401, 403):
+        raise RpcError(ERR_UPSTREAM_AUTH, "API 키가 필요하거나 유효하지 않습니다", data)
+    if r.status_code == 404:
+        raise RpcError(
+            ERR_UPSTREAM_NOT_FOUND,
+            "엔드포인트 경로 또는 모델 ID를 찾을 수 없습니다",
+            data,
+        )
+    if r.status_code >= 500:
+        raise RpcError(
+            ERR_UPSTREAM_UNAVAILABLE,
+            f"추론 서버가 응답하지 않습니다 (HTTP {r.status_code})",
+            data,
+        )
+    raise RpcError(
+        ERR_UPSTREAM_UNAVAILABLE,
+        f"추론 서버 오류 (HTTP {r.status_code})",
+        data,
+    )
+
+
+def _post_json(
+    client: httpx.Client,
+    url: str,
+    body: dict[str, Any],
+    role: str,
+) -> dict[str, Any]:
+    try:
+        r = client.post(url, json=body)
+    except httpx.HTTPError as e:
+        raise RpcError(
+            ERR_UPSTREAM_UNAVAILABLE,
+            "추론 서버에 연결할 수 없습니다",
+            {"url": url, "role": role, "detail": str(e)},
+        ) from e
+    _raise_upstream_for_status(r, url, role)
+    try:
+        return r.json()  # type: ignore[no-any-return]
+    except ValueError as e:
+        raise RpcError(
+            ERR_UPSTREAM_BAD_RESPONSE,
+            "추론 서버가 JSON이 아닌 응답을 돌려주었습니다",
+            {"url": url, "role": role},
+        ) from e
 
 
 def _coerce_endpoint(
@@ -101,10 +165,23 @@ class LlmClient(_EndpointClient):
             body["stop"] = stop
         if response_format:
             body["response_format"] = response_format
-        r = self._client.post(resolve_chat_url(self._endpoint), json=body)
-        r.raise_for_status()
-        data = r.json()
-        return str(data["choices"][0]["message"]["content"])
+        data = _post_json(self._client, resolve_chat_url(self._endpoint), body, role="llm")
+        choices = data.get("choices") or []
+        if not choices:
+            return ""
+        msg = choices[0].get("message") or {}
+        # Reasoning models (gpt-oss, o1-style) sometimes return an empty
+        # `content` with the actual answer in a sibling `reasoning` field
+        # when token budget is tight. Fall back to that rather than
+        # surfacing an empty string to the retriever.
+        content = msg.get("content") or ""
+        # Different reasoning-model conventions: OpenAI o1 / gpt-oss use
+        # `reasoning`, llama-server with Qwen reasoning uses
+        # `reasoning_content`. Fall back to whichever is populated so
+        # the caller doesn't silently receive an empty answer.
+        if not content:
+            content = msg.get("reasoning_content") or msg.get("reasoning") or ""
+        return str(content)
 
 
 class EmbedClient(_EndpointClient):
@@ -114,9 +191,12 @@ class EmbedClient(_EndpointClient):
         body: dict[str, Any] = {"input": texts}
         if self._endpoint.model_id:
             body["model"] = self._endpoint.model_id
-        r = self._client.post(resolve_embeddings_url(self._endpoint), json=body)
-        r.raise_for_status()
-        data = r.json()
+        data = _post_json(
+            self._client,
+            resolve_embeddings_url(self._endpoint),
+            body,
+            role="embed",
+        )
         return [item["embedding"] for item in data["data"]]
 
 
@@ -132,9 +212,12 @@ class RerankClient(_EndpointClient):
             body["model"] = self._endpoint.model_id
         if top_k is not None:
             body["top_n"] = top_k
-        r = self._client.post(resolve_rerank_url(self._endpoint), json=body)
-        r.raise_for_status()
-        data = r.json()
+        data = _post_json(
+            self._client,
+            resolve_rerank_url(self._endpoint),
+            body,
+            role="rerank",
+        )
         return [
             {"index": int(x["index"]), "score": float(x["relevance_score"])}
             for x in data.get("results", [])

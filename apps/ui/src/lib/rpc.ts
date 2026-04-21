@@ -44,12 +44,72 @@ export type SearchResponse = {
 export async function search(
   query: string,
   opts: { topK?: number; ask?: boolean } = {},
-): Promise<SearchResponse> {
-  return rpc<SearchResponse>("search", {
+): Promise<SearchResponse & { warning?: string; detail?: string }> {
+  return rpc<SearchResponse & { warning?: string; detail?: string }>("search", {
     query,
     top_k: opts.topK ?? 10,
     mode: opts.ask ? "ask" : "search",
   });
+}
+
+// ---- fast (file-name) search ---------------------------------------------
+
+export type FastRow = {
+  path: string;
+  name: string;
+  parent: string;
+  size: number;
+  mtime: number;
+  ext: string;
+};
+
+export type FastSearchResponse = {
+  query: string;
+  results: FastRow[];
+  total_indexed: number;
+};
+
+export async function filesSearch(
+  query: string,
+  opts: { limit?: number; exts?: string[] } = {},
+): Promise<FastSearchResponse> {
+  return rpc<FastSearchResponse>("files.search", {
+    query,
+    limit: opts.limit ?? 50,
+    exts: opts.exts ?? null,
+  });
+}
+
+export type FastStats = {
+  total: number;
+  by_ext: { ext: string; count: number }[];
+};
+
+export async function filesStats(): Promise<FastStats> {
+  return rpc<FastStats>("files.stats");
+}
+
+export async function indexRescan(): Promise<{
+  totals: { roots: number; seen: number; upserted: number };
+  per_root: Array<{ root: string; seen?: number; upserted?: number; error?: string }>;
+}> {
+  return rpc("index.rescan");
+}
+
+export type DocPathCandidate = {
+  path: string;
+  display_name: string;
+  exists: boolean;
+  has_documents: boolean;
+  sample_count: number;
+};
+
+export async function docpathsDiscover(): Promise<{ candidates: DocPathCandidate[] }> {
+  return rpc<{ candidates: DocPathCandidate[] }>("docpaths.discover");
+}
+
+export async function docpathsAddDefaults(): Promise<{ added: string[]; skipped: string[] }> {
+  return rpc("docpaths.add_defaults");
 }
 
 export async function addRoot(path: string): Promise<{ ok: boolean; path?: string; error?: string }> {

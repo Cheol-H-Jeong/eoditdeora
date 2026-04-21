@@ -46,6 +46,14 @@ ERR_METHOD_NOT_FOUND = -32601
 ERR_INVALID_PARAMS = -32602
 ERR_INTERNAL = -32603
 
+# Application-defined (JSON-RPC reserves -32000..-32099 for server errors).
+# Used by upstream-facing clients so the UI can distinguish "your API key
+# is missing" from "generic exception".
+ERR_UPSTREAM_AUTH = -32010          # 401 / 403 from the model server
+ERR_UPSTREAM_NOT_FOUND = -32011     # 404 — wrong base URL or model id
+ERR_UPSTREAM_UNAVAILABLE = -32012   # 5xx or connection error
+ERR_UPSTREAM_BAD_RESPONSE = -32013  # 200 but body not parseable
+
 
 class RpcServer:
     def __init__(self) -> None:

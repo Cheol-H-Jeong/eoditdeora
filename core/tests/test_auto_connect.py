@@ -124,6 +124,38 @@ def test_auto_connect_no_servers_leaves_settings_alone(monkeypatch: pytest.Monke
     assert s2.model.llm.base_url == ""
 
 
+def test_auto_connect_skips_auth_required_server(monkeypatch: pytest.MonkeyPatch):
+    # A server whose /v1/models is open but /v1/chat/completions is
+    # 401 must NOT be auto-assigned — the resulting settings.toml would
+    # persist a guaranteed-to-fail endpoint. The user has to enter the
+    # API key manually first.
+    s = load_settings()
+    s.model.llm = EndpointConfig()
+    s.model.embed = EndpointConfig()
+    s.model.rerank = EndpointConfig()
+    save_settings(s)
+
+    monkeypatch.setattr(
+        ac_mod,
+        "discover_local",
+        lambda timeout=1.5: [
+            Probe(
+                base_url="http://127.0.0.1:8081/v1",
+                api_kind="openai",
+                reachable=False,
+                models=["qwen3.6-35b-a3b"],
+                error="auth_required",
+            )
+        ],
+    )
+
+    result = auto_connect()
+    assert result["assigned"] == {}
+    assert any("skipped:auth_required" in a for a in result["actions"])
+    s2 = load_settings()
+    assert s2.model.llm.base_url == ""
+
+
 def test_llm_size_tiebreaker(monkeypatch: pytest.MonkeyPatch):
     s = load_settings()
     s.model.llm = EndpointConfig()

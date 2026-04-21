@@ -5,19 +5,25 @@
     autostartDisable,
     autostartEnable,
     autostartStatus,
+    docpathsAddDefaults,
+    docpathsDiscover,
     endpointsAutoConnect,
     endpointsDiscover,
     endpointsHealth,
     endpointsPresets,
     endpointsTest,
     endpointsUpdate,
+    filesStats,
     getSettings,
+    indexRescan,
     indexStatus,
     removeRoot,
     type AutoConnectResult,
     type AutostartStatus,
+    type DocPathCandidate,
     type Endpoint,
     type EndpointHealth,
+    type FastStats,
     type IndexStatus,
     type Preset,
     type ProbeResult,
@@ -51,35 +57,96 @@
   let newPath = $state("");
   let busy = $state<Record<string, boolean>>({});
   let timer: number | undefined;
+  let docCandidates = $state<DocPathCandidate[]>([]);
+  let fastStats = $state<FastStats | null>(null);
+  let rescanMsg = $state<string>("");
 
-  async function refresh() {
+  // Periodic refresh must NOT touch `endpoints` — the user is often
+  // mid-edit on the base URL / API key inputs, and pulling the stored
+  // (possibly empty) values from the backend every 3s would wipe the
+  // characters they just typed. Endpoint form state is owned by the
+  // UI and only reconciled on explicit events (mount, save, auto-
+  // connect, preset pick, discovery pick).
+  async function refreshRuntime() {
     try {
       const idx: IndexStatus = await indexStatus();
       roots = idx.roots;
       docCount = idx.index.doc_count;
       autostart = await autostartStatus();
+      const h = await endpointsHealth();
+      health = h.roles;
+      try {
+        fastStats = await filesStats();
+      } catch {
+        fastStats = null;
+      }
+    } catch (e) {
+      console.warn(e);
+    }
+  }
+
+  async function refreshDocCandidates() {
+    try {
+      const d = await docpathsDiscover();
+      docCandidates = d.candidates;
+    } catch (e) {
+      console.warn(e);
+    }
+  }
+
+  async function onAddDefaults() {
+    busy = { ...busy, addDefaults: true };
+    try {
+      const r = await docpathsAddDefaults();
+      rescanMsg = r.added.length
+        ? `${r.added.length}개 폴더를 추가했습니다.`
+        : "추가할 새 폴더가 없습니다.";
+      await refreshRuntime();
+    } catch (e) {
+      rescanMsg = String(e);
+    } finally {
+      busy = { ...busy, addDefaults: false };
+    }
+  }
+
+  async function onRescan() {
+    busy = { ...busy, rescan: true };
+    rescanMsg = "재탐색 중...";
+    try {
+      const r = await indexRescan();
+      rescanMsg = `재탐색 완료 — ${r.totals.roots}개 폴더, ${r.totals.upserted.toLocaleString()}개 파일 색인.`;
+      await refreshRuntime();
+    } catch (e) {
+      rescanMsg = String(e);
+    } finally {
+      busy = { ...busy, rescan: false };
+    }
+  }
+
+  async function refreshEndpoints() {
+    try {
       const s = await getSettings();
       endpoints = {
         llm: s.model.llm,
         embed: s.model.embed,
         rerank: s.model.rerank,
       };
-      const h = await endpointsHealth();
-      health = h.roles;
     } catch (e) {
       console.warn(e);
     }
   }
 
   onMount(async () => {
-    await refresh();
+    await refreshEndpoints();
+    await refreshRuntime();
+    await refreshDocCandidates();
     try {
       const p = await endpointsPresets();
       presets = p.presets;
     } catch (e) {
       console.warn(e);
     }
-    timer = window.setInterval(refresh, 3000);
+    timer = window.setInterval(refreshRuntime, 3000);
   });
 
   onDestroy(() => {
@@ -93,7 +160,7 @@
     try {
       const result = await addRoot(p);
       if (result.ok) newPath = "";
-      await refresh();
+      await refreshRuntime();
     } finally {
       busy = { ...busy, add: false };
     }
@@ -103,7 +170,7 @@
     busy = { ...busy, [path]: true };
     try {
       await removeRoot(path);
-      await refresh();
+      await refreshRuntime();
     } finally {
       busy = { ...busy, [path]: false };
     }
@@ -115,7 +182,7 @@
     try {
       if (autostart.enabled) await autostartDisable();
       else await autostartEnable();
-      await refresh();
+      await refreshRuntime();
     } finally {
       busy = { ...busy, autostart: false };
     }
@@ -144,7 +211,8 @@
       } else {
         autoConnectMsg = `자동 연결됨: ${assigned.join(", ")}`;
       }
-      await refresh();
+      await refreshEndpoints();
+      await refreshRuntime();
     } catch (e) {
       autoConnectMsg = String(e);
     } finally {
@@ -176,7 +244,10 @@
     busy = { ...busy, [`save:${role}`]: true };
     try {
       await endpointsUpdate(role, e);
-      await refresh();
+      // The server may normalize (e.g. strip trailing /) what we sent.
+      // Pull it back so the form matches truth, then refresh health.
+      await refreshEndpoints();
+      await refreshRuntime();
     } finally {
       busy = { ...busy, [`save:${role}`]: false };
     }
@@ -250,7 +321,43 @@
       />
       <button onclick={onAdd} disabled={busy.add || !newPath.trim()}>추가</button>
     </div>
-    <p class="stat">색인된 문서 <strong>{docCount.toLocaleString()}</strong>개</p>
+    <div class="discover-row">
+      <button onclick={onAddDefaults} disabled={busy.addDefaults}>
+        주요 문서 폴더 자동 추가
+      </button>
+      <button class="cancel" onclick={onRescan} disabled={busy.rescan}>
+        재탐색
+      </button>
+    </div>
+    {#if rescanMsg}
+      <p class="hint small">{rescanMsg}</p>
+    {/if}
+    {#if docCandidates.length}
+      <details class="disc-det">
+        <summary>감지된 주요 폴더 ({docCandidates.filter(c => c.exists).length}개 존재)</summary>
+        <ul class="cand-list">
+          {#each docCandidates as c}
+            <li class:missing={!c.exists}>
+              <span class="cand-name">{c.display_name}</span>
+              <span class="cand-path" title={c.path}>{c.path}</span>
+              {#if c.has_documents}
+                <span class="cand-badge ok">문서 있음</span>
+              {:else if c.exists}
+                <span class="cand-badge">비어있음</span>
+              {:else}
+                <span class="cand-badge muted">없음</span>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      </details>
+    {/if}
+    <p class="stat">
+      문서 본문 색인 <strong>{docCount.toLocaleString()}</strong>개
+      {#if fastStats}
+        · 파일명 색인 <strong>{fastStats.total.toLocaleString()}</strong>개
+      {/if}
+    </p>
   </section>
 
   <section>
@@ -559,4 +666,54 @@
     background: #1f2330; color: #a0a6b0;
   }
   .actions { justify-content: flex-start; }
+  .disc-det {
+    margin: 6px 0 10px;
+    background: #12151c;
+    border: 1px solid #1e2230;
+    border-radius: 8px;
+    padding: 6px 10px;
+  }
+  .disc-det summary {
+    font-size: 11px;
+    color: #8ab4ff;
+    cursor: pointer;
+    outline: none;
+  }
+  .cand-list {
+    list-style: none;
+    padding: 0;
+    margin: 8px 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .cand-list li {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    font-size: 10.5px;
+  }
+  .cand-list li.missing { opacity: 0.5; }
+  .cand-name {
+    flex: 0 0 90px;
+    color: #c7cbd3;
+    font-weight: 600;
+  }
+  .cand-path {
+    flex: 1;
+    color: #6b7280;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cand-badge {
+    font-size: 9.5px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: #1f2330;
+    color: #a0a6b0;
+  }
+  .cand-badge.ok { background: #0f4f2d; color: #7be3a7; }
+  .cand-badge.muted { background: #2a2f3a; color: #6b7280; }
 </style>
