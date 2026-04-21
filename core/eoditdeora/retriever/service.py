@@ -70,6 +70,8 @@ async def search(query: str, top_k: int = 10, mode: str = "search") -> dict[str,
             if use_hybrid
             else lexical_search(query, top_k=top_k)
         )
+    except RpcError:
+        raise
     except Exception as e:  # noqa: BLE001
         log.exception(
             "search_backend_failed",

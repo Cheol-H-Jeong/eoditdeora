@@ -129,3 +129,24 @@ async def test_ask_mode_preserves_structured_rpc_errors(
         await service_mod.search("질의", top_k=3, mode="ask")
 
     assert ei.value.code == ERR_UPSTREAM_UNAVAILABLE
+
+
+@pytest.mark.asyncio
+async def test_ask_mode_preserves_structured_backend_rpc_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_hybrid(_q: str, *, top_k: int = 10) -> list[dict[str, Any]]:
+        raise RpcError(
+            ERR_UPSTREAM_UNAVAILABLE,
+            "임베딩 서버에 연결할 수 없습니다",
+            {"role": "embed", "detail": "connection refused"},
+        )
+
+    monkeypatch.setattr(service_mod, "hybrid_search", fail_hybrid)
+
+    with pytest.raises(RpcError) as ei:
+        await service_mod.search("질의", top_k=3, mode="ask")
+
+    assert ei.value.code == ERR_UPSTREAM_UNAVAILABLE
+    assert ei.value.data is not None
+    assert ei.value.data.get("role") == "embed"
