@@ -115,6 +115,21 @@ def test_rtf_parser_skips_binary_payload_inside_pict_group(tmp_path: Path):
     assert [b.text for b in res.doc.blocks] == ["alpha", "omega"]
 
 
+def test_rtf_parser_preserves_table_cell_and_row_boundaries(tmp_path: Path):
+    f = tmp_path / "table.rtf"
+    f.write_text(
+        "{\\rtf1\\ansi\\deff0 "
+        "\\trowd\\cellx1000\\cellx2000 "
+        "\\intbl \\u54637?\\u47785?\\cell \\u44552?\\u50529?\\cell\\row "
+        "\\trowd\\cellx1000\\cellx2000 "
+        "\\intbl \\u50868?\\u50689?\\u48708?\\cell 120000\\cell\\row}",
+        encoding="latin-1",
+    )
+    res = RtfParser().parse(f, doc_id="sha256:" + "7" * 64)
+    assert res.doc.parse_status == "ok"
+    assert [b.text for b in res.doc.blocks] == ["항목\t금액\n운영비\t120000"]
+
+
 def test_odt_parser_extracts_headings_paragraphs_and_metadata(tmp_path: Path):
     f = tmp_path / "memo.odt"
     _write_odf_zip(

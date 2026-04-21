@@ -246,6 +246,14 @@ def _extract_rtf_text(raw: bytes) -> str | None:
             _flush_ansi_bytes()
             if not ignorable:
                 out.append("\t")
+        elif word in ("cell", "nestcell"):
+            _flush_ansi_bytes()
+            if not ignorable and (not out or out[-1] != "\t"):
+                out.append("\t")
+        elif word in ("row", "nestrow"):
+            _flush_ansi_bytes()
+            if not ignorable and (not out or out[-1] != "\n"):
+                out.append("\n")
         elif word in ("emdash", "endash"):
             _flush_ansi_bytes()
             if not ignorable:
