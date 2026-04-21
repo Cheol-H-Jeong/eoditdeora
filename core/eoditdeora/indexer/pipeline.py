@@ -91,6 +91,18 @@ def _upsert_parsed_doc(
     )
 
 
+def _delete_existing_doc(
+    *,
+    doc_id: str,
+    meta: MetaStore,
+    fts: FtsStore,
+    vectors: VectorStore,
+) -> None:
+    meta.delete_document(doc_id)
+    fts.delete_doc(doc_id)
+    vectors.delete_doc(doc_id)
+
+
 def _parse_with_timeout(path: Path, *, doc_id: str, timeout_sec: int):
     done = threading.Event()
     result_queue: "queue.Queue[tuple[str, object]]" = queue.Queue(maxsize=1)
@@ -178,12 +190,20 @@ def index_file(
     existing = meta.get_document_by_path(str(path))
 
     if path.stat().st_size == 0:
-        doc = ParsedDoc(
-            doc_id=_doc_id_for(
-                path,
+        empty_doc_id = _doc_id_for(
+            path,
+            meta=meta,
+            existing_doc_id=existing["doc_id"] if existing else None,
+        )
+        if existing and existing["doc_id"] != empty_doc_id:
+            _delete_existing_doc(
+                doc_id=existing["doc_id"],
                 meta=meta,
-                existing_doc_id=existing["doc_id"] if existing else None,
-            ),
+                fts=fts,
+                vectors=vectors,
+            )
+        doc = ParsedDoc(
+            doc_id=empty_doc_id,
             source_path=str(path),
             source_path_display=display_path(path),
             format=(path.suffix.lower().lstrip(".") or "unknown"),
@@ -207,10 +227,12 @@ def index_file(
     # If the same source_path had a previous doc_id (content changed), drop
     # the old rows from every store so the new content fully replaces it.
     if existing and existing["doc_id"] != doc_id:
-        old_id = existing["doc_id"]
-        meta.delete_document(old_id)
-        fts.delete_doc(old_id)
-        vectors.delete_doc(old_id)
+        _delete_existing_doc(
+            doc_id=existing["doc_id"],
+            meta=meta,
+            fts=fts,
+            vectors=vectors,
+        )
 
     timeout_sec = max(1, int(load_settings().index.parser_timeout_sec))
 

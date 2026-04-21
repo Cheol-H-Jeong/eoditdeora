@@ -88,6 +88,25 @@ def test_content_change_replaces_chunks(tmp_path: Path, stores):
     assert fts.search("uvwxyz", top_k=5)
 
 
+def test_content_change_to_empty_replaces_document_without_crashing(tmp_path: Path, stores):
+    meta, fts, vec = stores
+    src = tmp_path / "note.txt"
+    src.write_text("비워지기 전 본문 empty_marker_123", encoding="utf-8")
+    index_file(_make_cf(src), meta=meta, fts=fts, vectors=vec)
+
+    time.sleep(0.01)
+    src.write_text("", encoding="utf-8")
+    result = index_file(_make_cf(src), meta=meta, fts=fts, vectors=vec)
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "empty"
+    assert meta.count_documents() == 1
+    current = meta.get_document_by_path(str(src.resolve()))
+    assert current is not None
+    assert current["size_bytes"] == 0
+    assert not fts.search("empty_marker_123", top_k=5)
+
+
 def test_deleted_file_purges_from_all_stores(tmp_path: Path, stores):
     meta, fts, vec = stores
     src = tmp_path / "note.txt"
