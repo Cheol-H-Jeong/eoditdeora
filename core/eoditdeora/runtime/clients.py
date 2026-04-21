@@ -74,6 +74,50 @@ def _is_retryable_status(status_code: int) -> bool:
     return status_code == 429 or status_code >= 500
 
 
+def _extract_error_detail(r: httpx.Response) -> str:
+    try:
+        payload = r.json()
+    except (ValueError, TypeError):
+        payload = None
+
+    candidates: list[Any] = []
+    if isinstance(payload, dict):
+        error_payload = payload.get("error")
+        if isinstance(error_payload, dict):
+            candidates.extend(
+                [
+                    error_payload.get("message"),
+                    error_payload.get("detail"),
+                    error_payload.get("error"),
+                    error_payload.get("code"),
+                    error_payload.get("type"),
+                ]
+            )
+        else:
+            candidates.append(error_payload)
+        candidates.extend(
+            [
+                payload.get("message"),
+                payload.get("detail"),
+                payload.get("error_description"),
+                payload.get("error_msg"),
+            ]
+        )
+    else:
+        try:
+            candidates.append(r.text)
+        except Exception:  # noqa: BLE001
+            pass
+
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        text = str(candidate).strip()
+        if text:
+            return text
+    return ""
+
+
 def _raise_upstream_for_status(r: httpx.Response, url: str, role: str) -> None:
     """Translate upstream HTTP errors into RpcError with helpful codes.
 
@@ -85,6 +129,9 @@ def _raise_upstream_for_status(r: httpx.Response, url: str, role: str) -> None:
     if r.status_code < 400:
         return
     data: dict[str, Any] = {"url": url, "role": role, "status": r.status_code}
+    detail = _extract_error_detail(r)
+    if detail:
+        data["detail"] = detail
     if r.status_code in (401, 403):
         raise RpcError(ERR_UPSTREAM_AUTH, "API 키가 필요하거나 유효하지 않습니다", data)
     if r.status_code == 404:

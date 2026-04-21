@@ -150,7 +150,7 @@ def test_llm_retries_transient_http_5xx_then_succeeds(monkeypatch: pytest.Monkey
 
 def test_llm_401_raises_upstream_auth():
     def handler(_req: httpx.Request) -> httpx.Response:
-        return httpx.Response(401, json={"error": "Invalid API Key"})
+        return httpx.Response(401, json={"error": {"message": "Invalid API Key"}})
 
     client = LlmClient("127.0.0.1", 0)
     client._client = _mock_client(handler)  # type: ignore[attr-defined]
@@ -161,6 +161,7 @@ def test_llm_401_raises_upstream_auth():
     # user directly to the relevant settings row.
     assert ei.value.data is not None
     assert ei.value.data.get("role") == "llm"
+    assert ei.value.data.get("detail") == "Invalid API Key"
 
 
 def test_embed_401_raises_upstream_auth():
@@ -242,13 +243,35 @@ def test_llm_429_raises_rate_limit_after_retries(monkeypatch: pytest.MonkeyPatch
 
 def test_llm_400_generic_4xx_raises_unavailable():
     def handler(_req: httpx.Request) -> httpx.Response:
-        return httpx.Response(400, json={"error": "bad request"})
+        return httpx.Response(400, json={"error": {"message": "model is required"}})
 
     client = LlmClient("127.0.0.1", 0)
     client._client = _mock_client(handler)  # type: ignore[attr-defined]
     with pytest.raises(RpcError) as ei:
         client.chat("s", "u")
     assert ei.value.code == ERR_UPSTREAM_UNAVAILABLE
+    assert ei.value.data is not None
+    assert ei.value.data.get("detail") == "model is required"
+
+
+def test_llm_5xx_plain_text_detail_is_preserved_after_retries(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    attempts = {"count": 0}
+    monkeypatch.setattr("eoditdeora.runtime.clients.time.sleep", lambda _sec: None)
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        return httpx.Response(503, text="upstream overloaded")
+
+    client = LlmClient("127.0.0.1", 0)
+    client._client = _mock_client(handler)  # type: ignore[attr-defined]
+    with pytest.raises(RpcError) as ei:
+        client.chat("s", "u")
+    assert ei.value.code == ERR_UPSTREAM_UNAVAILABLE
+    assert attempts["count"] == 3
+    assert ei.value.data is not None
+    assert ei.value.data.get("detail") == "upstream overloaded"
 
 
 def test_llm_does_not_retry_non_retryable_404():

@@ -10,9 +10,18 @@ from eoditdeora.runtime.clients import LlmClient
 
 
 class _MockStreamResponse:
-    def __init__(self, lines: list[str], status_code: int = 200) -> None:
+    def __init__(
+        self,
+        lines: list[str],
+        status_code: int = 200,
+        *,
+        json_data: object | None = None,
+        text: str = "",
+    ) -> None:
         self._lines = lines
         self.status_code = status_code
+        self._json_data = json_data
+        self.text = text
 
     def __enter__(self) -> _MockStreamResponse:
         return self
@@ -22,6 +31,11 @@ class _MockStreamResponse:
 
     def iter_lines(self) -> Iterator[str]:
         yield from self._lines
+
+    def json(self) -> object:
+        if self._json_data is None:
+            raise ValueError("no json body")
+        return self._json_data
 
 
 def test_chat_stream_yields_content_chunks_in_order(monkeypatch: pytest.MonkeyPatch):
@@ -135,7 +149,11 @@ def test_chat_stream_retries_transport_error_then_succeeds(monkeypatch: pytest.M
 
 def test_chat_stream_surfaces_rate_limit(monkeypatch: pytest.MonkeyPatch):
     def fake_stream(_method: str, _url: str, **_kwargs):
-        return _MockStreamResponse([], status_code=429)
+        return _MockStreamResponse(
+            [],
+            status_code=429,
+            json_data={"error": {"message": "too many requests"}},
+        )
 
     monkeypatch.setattr(httpx, "stream", fake_stream)
     client = LlmClient("127.0.0.1", 0)
@@ -143,6 +161,8 @@ def test_chat_stream_surfaces_rate_limit(monkeypatch: pytest.MonkeyPatch):
     with pytest.raises(RpcError) as ei:
         list(client.chat_stream("sys", "usr"))
     assert ei.value.code == ERR_UPSTREAM_RATE_LIMIT
+    assert ei.value.data is not None
+    assert ei.value.data.get("detail") == "too many requests"
 
 
 def test_chat_stream_retries_transient_http_5xx_then_succeeds(
