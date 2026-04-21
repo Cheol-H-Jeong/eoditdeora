@@ -22,7 +22,7 @@ import os
 import queue
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from eoditdeora.collector.ignore import IgnoreMatcher
 from eoditdeora.config import load_settings
@@ -61,14 +61,19 @@ def _walk_subroot(
     allowed_exts: set[str],
     max_bytes: int,
     outbox: queue.Queue[tuple[object, int, float]],
+    should_abort: Callable[[], bool],
 ) -> None:
     seen = 0
     upserted = 0
     started = time.perf_counter()
     try:
         for dirpath, dirnames, filenames in os.walk(subroot, followlinks=False):
+            if should_abort():
+                break
             _prune_dirnames(dirnames)
             for name in filenames:
+                if should_abort():
+                    break
                 seen += 1
                 ext = os.path.splitext(name)[1].lower()
                 if allowed_exts and ext not in allowed_exts:
@@ -95,7 +100,13 @@ def _walk_subroot(
         outbox.put((_SUBROOT_DONE, seen, upserted))
 
 
-def scan_root(root: Path, allowed_exts: set[str], max_bytes: int) -> tuple[int, int]:
+def scan_root(
+    root: Path,
+    allowed_exts: set[str],
+    max_bytes: int,
+    *,
+    should_abort: Callable[[], bool] | None = None,
+) -> tuple[int, int]:
     """Walk `root` once and upsert every matching file into the fast index.
 
     Returns (files_seen, files_upserted). `files_seen` counts entries
@@ -106,7 +117,13 @@ def scan_root(root: Path, allowed_exts: set[str], max_bytes: int) -> tuple[int, 
     root = root.resolve()
     if not root.is_dir():
         return 0, 0
-    return _scan_root_impl(root, allowed_exts, max_bytes, max_workers=_MAX_WORKERS)
+    return _scan_root_impl(
+        root,
+        allowed_exts,
+        max_bytes,
+        max_workers=_MAX_WORKERS,
+        should_abort=should_abort,
+    )
 
 
 def _scan_root_impl(
@@ -115,11 +132,14 @@ def _scan_root_impl(
     max_bytes: int,
     *,
     max_workers: int,
+    should_abort: Callable[[], bool] | None = None,
 ) -> tuple[int, int]:
     matcher = IgnoreMatcher(root)
     fast = FastIndex()
     seen = 0
     upserted = 0
+    aborted = False
+    should_abort = should_abort or (lambda: False)
     current_paths: set[str] = set()
     batch: list[tuple[str, int, float]] = []
     outbox: queue.Queue[tuple[object, int, float]] = queue.Queue(maxsize=_BATCH * 4)
@@ -127,6 +147,9 @@ def _scan_root_impl(
     try:
         with os.scandir(root) as entries:
             for entry in entries:
+                if should_abort():
+                    aborted = True
+                    break
                 if entry.is_dir(follow_symlinks=False):
                     if entry.name not in _SKIP_DIRS and not entry.name.startswith("."):
                         subroots.append(Path(entry.path))
@@ -151,20 +174,34 @@ def _scan_root_impl(
                 current_paths.add(path_str)
                 batch.append((path_str, st.st_size, st.st_mtime))
                 if len(batch) >= _BATCH:
+                    if should_abort():
+                        aborted = True
+                        break
                     upserted += fast.upsert_many(batch)
                     batch.clear()
         if max_workers <= 1:
             for subroot in subroots:
-                _walk_subroot(subroot, matcher, allowed_exts, max_bytes, outbox)
+                if aborted or should_abort():
+                    aborted = True
+                    break
+                _walk_subroot(
+                    subroot, matcher, allowed_exts, max_bytes, outbox, should_abort
+                )
                 while True:
                     item = outbox.get()
                     if item[0] is _SUBROOT_DONE:
                         seen += int(item[1])
                         break
+                    if should_abort():
+                        aborted = True
+                        continue
                     path_str = str(item[0])
                     current_paths.add(path_str)
                     batch.append((path_str, int(item[1]), float(item[2])))
                     if len(batch) >= _BATCH:
+                        if should_abort():
+                            aborted = True
+                            break
                         upserted += fast.upsert_many(batch)
                         batch.clear()
         else:
@@ -177,6 +214,7 @@ def _scan_root_impl(
                         allowed_exts,
                         max_bytes,
                         outbox,
+                        should_abort,
                     )
                     for subroot in subroots
                 ]
@@ -187,17 +225,25 @@ def _scan_root_impl(
                         seen += int(item[1])
                         completed += 1
                         continue
+                    if should_abort():
+                        aborted = True
+                        continue
                     path_str = str(item[0])
                     current_paths.add(path_str)
                     batch.append((path_str, int(item[1]), float(item[2])))
                     if len(batch) >= _BATCH:
+                        if should_abort():
+                            aborted = True
+                            break
                         upserted += fast.upsert_many(batch)
                         batch.clear()
                 for future in futures:
                     future.result()
-        if batch:
+        if batch and not aborted:
             upserted += fast.upsert_many(batch)
-        deleted = fast.delete_missing_under(root, current_paths)
+        deleted = 0
+        if not aborted:
+            deleted = fast.delete_missing_under(root, current_paths)
         if deleted:
             log.info("fast_scan_stale_rows_deleted", root=str(root), deleted=deleted)
     finally:

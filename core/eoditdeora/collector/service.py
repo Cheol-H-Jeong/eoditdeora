@@ -60,6 +60,8 @@ async def remove_root(path: str) -> dict[str, Any]:
     ]
     removed = before - len(settings.index.roots)
     save_settings(settings)
+    if removed:
+        _refresh_indexer_daemon()
     removed_fast_rows = 0
     if removed:
         fast = FastIndex()
@@ -68,7 +70,6 @@ async def remove_root(path: str) -> dict[str, Any]:
         finally:
             fast.close()
     log.info("root_removed", path=str(abs_path), removed=removed)
-    _refresh_indexer_daemon()
     return {"ok": True, "removed": removed, "fast_index_removed": removed_fast_rows}
 
 

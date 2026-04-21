@@ -179,7 +179,12 @@ class IndexerDaemon:
 
             settings = load_settings()
             allowed = {e.lower() for e in settings.index.extensions}
-            seen, up = scan_root(root, allowed, max_bytes)
+            seen, up = scan_root(
+                root,
+                allowed,
+                max_bytes,
+                should_abort=lambda: not self._root_is_active(root),
+            )
             if not self._root_is_active(root):
                 fast = FastIndex()
                 try:

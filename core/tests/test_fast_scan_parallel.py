@@ -99,3 +99,27 @@ def test_scan_root_rescan_removes_deleted_files(tmp_path: Path):
 
     assert str(first.resolve()) in paths
     assert str(second.resolve()) not in paths
+
+
+def test_scan_root_abort_skips_partial_flush(tmp_path: Path):
+    root = tmp_path / "docs"
+    root.mkdir()
+    target = root / "draft.txt"
+    target.write_text("x", encoding="utf-8")
+
+    seen, upserted = _scan_root_impl(
+        root,
+        {".txt"},
+        0,
+        max_workers=1,
+        should_abort=lambda: True,
+    )
+
+    idx = FastIndex()
+    try:
+        assert idx.search("draft") == []
+    finally:
+        idx.close()
+
+    assert seen == 0
+    assert upserted == 0
