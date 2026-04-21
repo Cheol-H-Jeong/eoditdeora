@@ -55,6 +55,11 @@ jobs:
           PYTHONPATH: core
         run: pytest core/tests -q
 
+      - name: End-to-end smoke test
+        env:
+          PYTHONPATH: core
+        run: python scripts/smoke_e2e.py
+
   # -------------------------------------------------------------------
   # Linux installer: PyInstaller → AppImage.
   # -------------------------------------------------------------------
