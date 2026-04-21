@@ -141,6 +141,18 @@ def _extract_bad_response_detail(r: httpx.Response) -> str:
     return " | ".join(parts)
 
 
+def _raise_bad_response(url: str, role: str, detail: str) -> None:
+    data: dict[str, Any] = {"url": url, "role": role}
+    normalized = detail.strip()
+    if normalized:
+        data["detail"] = normalized
+    raise RpcError(
+        ERR_UPSTREAM_BAD_RESPONSE,
+        "추론 서버 응답 JSON 형식이 올바르지 않습니다",
+        data,
+    )
+
+
 def _raise_upstream_for_status(r: httpx.Response, url: str, role: str) -> None:
     """Translate upstream HTTP errors into RpcError with helpful codes.
 
@@ -451,16 +463,24 @@ class EmbedClient(_EndpointClient):
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
+        url = resolve_embeddings_url(self._endpoint)
         body: dict[str, Any] = {"input": texts}
         if self._endpoint.model_id:
             body["model"] = self._endpoint.model_id
-        data = _post_json(
-            self._client,
-            resolve_embeddings_url(self._endpoint),
-            body,
-            role="embed",
-        )
-        return [item["embedding"] for item in data["data"]]
+        data = _post_json(self._client, url, body, role="embed")
+        items = data.get("data")
+        if not isinstance(items, list):
+            _raise_bad_response(url, "embed", "missing data[]")
+
+        vectors: list[list[float]] = []
+        for idx, item in enumerate(items):
+            if not isinstance(item, dict):
+                _raise_bad_response(url, "embed", f"data[{idx}] is not an object")
+            embedding = item.get("embedding")
+            if not isinstance(embedding, list):
+                _raise_bad_response(url, "embed", f"data[{idx}].embedding is missing")
+            vectors.append(embedding)
+        return vectors
 
 
 class RerankClient(_EndpointClient):
@@ -470,21 +490,34 @@ class RerankClient(_EndpointClient):
         docs: list[str],
         top_k: int | None = None,
     ) -> list[dict[str, Any]]:
+        url = resolve_rerank_url(self._endpoint)
         body: dict[str, Any] = {"query": query, "documents": docs}
         if self._endpoint.model_id:
             body["model"] = self._endpoint.model_id
         if top_k is not None:
             body["top_n"] = top_k
-        data = _post_json(
-            self._client,
-            resolve_rerank_url(self._endpoint),
-            body,
-            role="rerank",
-        )
-        return [
-            {"index": int(x["index"]), "score": float(x["relevance_score"])}
-            for x in data.get("results", [])
-        ]
+        data = _post_json(self._client, url, body, role="rerank")
+        raw_results = data.get("results")
+        if not isinstance(raw_results, list):
+            _raise_bad_response(url, "rerank", "missing results[]")
+
+        results: list[dict[str, Any]] = []
+        for idx, item in enumerate(raw_results):
+            if not isinstance(item, dict):
+                _raise_bad_response(url, "rerank", f"results[{idx}] is not an object")
+            raw_index = item.get("index")
+            raw_score = item.get("relevance_score")
+            try:
+                index = int(raw_index)
+                score = float(raw_score)
+            except (TypeError, ValueError):
+                _raise_bad_response(
+                    url,
+                    "rerank",
+                    f"results[{idx}] is missing numeric index/relevance_score",
+                )
+            results.append({"index": index, "score": score})
+        return results
 
 
 # ---- factories -----------------------------------------------------------

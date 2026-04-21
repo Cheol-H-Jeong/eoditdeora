@@ -14,6 +14,7 @@ import pytest
 
 from eoditdeora.api.rpc_server import (
     ERR_UPSTREAM_AUTH,
+    ERR_UPSTREAM_BAD_RESPONSE,
     ERR_UPSTREAM_NOT_FOUND,
     ERR_UPSTREAM_RATE_LIMIT,
     ERR_UPSTREAM_UNAVAILABLE,
@@ -91,6 +92,20 @@ def test_embed_client_parses_openai_response():
     assert vecs == [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]
 
 
+def test_embed_client_malformed_json_raises_bad_response():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/embeddings"
+        return httpx.Response(200, json={"data": [{"not_embedding": [0.1, 0.2]}]})
+
+    client = EmbedClient("127.0.0.1", 0)
+    client._client = _mock_client(handler)  # type: ignore[attr-defined]
+    with pytest.raises(RpcError) as ei:
+        client.embed(["가"])
+    assert ei.value.code == ERR_UPSTREAM_BAD_RESPONSE
+    assert ei.value.data is not None
+    assert ei.value.data.get("detail") == "data[0].embedding is missing"
+
+
 def test_embed_empty_input_returns_empty():
     client = EmbedClient("127.0.0.1", 0)
     assert client.embed([]) == []
@@ -116,6 +131,20 @@ def test_rerank_client_normalizes_scores():
         {"index": 2, "score": 0.9},
         {"index": 0, "score": 0.7},
     ]
+
+
+def test_rerank_client_malformed_json_raises_bad_response():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/rerank"
+        return httpx.Response(200, json={"results": [{"index": "x", "relevance_score": "bad"}]})
+
+    client = RerankClient("127.0.0.1", 0)
+    client._client = _mock_client(handler)  # type: ignore[attr-defined]
+    with pytest.raises(RpcError) as ei:
+        client.rerank("질의", ["a"])
+    assert ei.value.code == ERR_UPSTREAM_BAD_RESPONSE
+    assert ei.value.data is not None
+    assert ei.value.data.get("detail") == "results[0] is missing numeric index/relevance_score"
 
 
 def test_llm_http_5xx_raises_upstream_unavailable():
@@ -225,7 +254,6 @@ def test_llm_non_json_body_raises_bad_response():
     client._client = _mock_client(handler)  # type: ignore[attr-defined]
     with pytest.raises(RpcError) as ei:
         client.chat("s", "u")
-    from eoditdeora.api.rpc_server import ERR_UPSTREAM_BAD_RESPONSE
     assert ei.value.code == ERR_UPSTREAM_BAD_RESPONSE
     assert ei.value.data is not None
     assert ei.value.data.get("detail") == (
