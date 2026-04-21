@@ -168,6 +168,38 @@ def test_moved_file_preserves_doc_id_and_updates_path(tmp_path: Path, stores):
     assert meta.get_document_by_path(str(src.resolve())) is None
 
 
+def test_moved_file_across_roots_updates_root_metadata(tmp_path: Path, stores):
+    meta, fts, vec = stores
+    root_a = tmp_path / "team-a"
+    root_b = tmp_path / "team-b"
+    root_a.mkdir()
+    root_b.mkdir()
+
+    src = root_a / "before.txt"
+    src.write_text("cross-root move payload", encoding="utf-8")
+    index_file(_make_cf(src), meta=meta, fts=fts, vectors=vec)
+
+    time.sleep(0.01)
+    dst = root_b / "after.txt"
+    src.rename(dst)
+    moved = CollectedFile(
+        path=dst.resolve(),
+        root=root_b.resolve(),
+        size=dst.stat().st_size,
+        mtime_ns=dst.stat().st_mtime_ns,
+        change=ChangeKind.MOVED,
+        previous_path=src.resolve(),
+    )
+
+    result = index_file(moved, meta=meta, fts=fts, vectors=vec)
+
+    assert result["status"] == "moved"
+    current = meta.get_document_by_path(str(dst.resolve()))
+    assert current is not None
+    assert current["root"] == str(root_b.resolve())
+    assert meta.get_document_by_path(str(src.resolve())) is None
+
+
 def test_duplicate_content_in_different_paths_keeps_both_documents(tmp_path: Path, stores):
     meta, fts, vec = stores
     root_a = tmp_path / "team-a"

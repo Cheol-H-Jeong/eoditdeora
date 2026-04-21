@@ -189,6 +189,7 @@ class MetaStore:
                      :summary_oneline, :summary_paragraph, :summary_detailed,
                      :language, :warnings_json, :metadata_json)
                 ON CONFLICT(doc_id) DO UPDATE SET
+                    root=excluded.root,
                     source_path=excluded.source_path,
                     source_path_display=excluded.source_path_display,
                     format=excluded.format,
@@ -207,7 +208,13 @@ class MetaStore:
         with self.tx() as cur:
             cur.execute("DELETE FROM documents WHERE doc_id = ?", (doc_id,))
 
-    def replace_path(self, old_path: str, new_path: str) -> str | None:
+    def replace_path(
+        self,
+        old_path: str,
+        new_path: str,
+        *,
+        new_root: str | None = None,
+    ) -> str | None:
         """Move one document row to a new source path without changing doc_id."""
         new_display = display_path(Path(new_path))
         with self.tx() as cur:
@@ -229,10 +236,12 @@ class MetaStore:
             cur.execute(
                 """
                 UPDATE documents
-                   SET source_path = ?, source_path_display = ?
+                   SET source_path = ?,
+                       source_path_display = ?,
+                       root = COALESCE(?, root)
                  WHERE doc_id = ?
                 """,
-                (new_path, new_display, doc_id),
+                (new_path, new_display, new_root, doc_id),
             )
             return doc_id
 
