@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import time
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -140,6 +141,33 @@ def _extract_bad_response_detail(r: httpx.Response) -> str:
     if snippet:
         parts.append(f"body={snippet}")
     return " | ".join(parts)
+
+
+def _retry_delay_for_response(r: httpx.Response, default_delay: float) -> float:
+    """Honor Retry-After when an upstream asks us to slow down.
+
+    Servers commonly send either delta-seconds (`Retry-After: 2`) or an
+    absolute HTTP date. We cap the result so one bad header cannot stall
+    the UI for an arbitrarily long time.
+    """
+    headers = getattr(r, "headers", None)
+    raw = ""
+    if headers is not None:
+        raw = str(headers.get("retry-after", "")).strip()
+    if not raw:
+        return default_delay
+    try:
+        delay = float(raw)
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(raw)
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return default_delay
+        now = time.time()
+        delay = retry_at.timestamp() - now
+    if delay <= 0:
+        return default_delay
+    return min(delay, _MAX_RETRY_DELAY_SEC)
 
 
 def _raise_bad_response(url: str, role: str, detail: str) -> None:
@@ -309,6 +337,7 @@ def _post_json(
 
         if r.status_code >= 400:
             if attempt < _MAX_UPSTREAM_ATTEMPTS and _is_retryable_status(r.status_code):
+                retry_delay = _retry_delay_for_response(r, delay)
                 log.warning(
                     "upstream_request_retry",
                     role=role,
@@ -317,9 +346,9 @@ def _post_json(
                     status=r.status_code,
                     attempt=attempt,
                     max_attempts=_MAX_UPSTREAM_ATTEMPTS,
-                    delay_sec=delay,
+                    delay_sec=retry_delay,
                 )
-                time.sleep(delay)
+                time.sleep(retry_delay)
                 delay = min(delay * 2, _MAX_RETRY_DELAY_SEC)
                 continue
             _raise_upstream_for_status(r, url, role)
@@ -456,6 +485,7 @@ class LlmClient(_EndpointClient):
                             attempt < _MAX_UPSTREAM_ATTEMPTS
                             and _is_retryable_status(r.status_code)
                         ):
+                            retry_delay = _retry_delay_for_response(r, delay)
                             log.warning(
                                 "upstream_stream_retry",
                                 role="llm",
@@ -464,9 +494,9 @@ class LlmClient(_EndpointClient):
                                 status=r.status_code,
                                 attempt=attempt,
                                 max_attempts=_MAX_UPSTREAM_ATTEMPTS,
-                                delay_sec=delay,
+                                delay_sec=retry_delay,
                             )
-                            time.sleep(delay)
+                            time.sleep(retry_delay)
                             delay = min(delay * 2, _MAX_RETRY_DELAY_SEC)
                             continue
                         _raise_upstream_for_status(r, url, "llm")

@@ -279,6 +279,52 @@ def test_llm_429_raises_rate_limit_after_retries(monkeypatch: pytest.MonkeyPatch
     assert attempts["count"] == 3
 
 
+def test_llm_429_honors_retry_after_header(monkeypatch: pytest.MonkeyPatch):
+    attempts = {"count": 0}
+    slept: list[float] = []
+    monkeypatch.setattr("eoditdeora.runtime.clients.time.sleep", slept.append)
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        return httpx.Response(
+            429,
+            json={"error": "rate limited"},
+            headers={"retry-after": "0.75"},
+        )
+
+    client = LlmClient("127.0.0.1", 0)
+    client._client = _mock_client(handler)  # type: ignore[attr-defined]
+    with pytest.raises(RpcError) as ei:
+        client.chat("s", "u")
+    assert ei.value.code == ERR_UPSTREAM_RATE_LIMIT
+    assert attempts["count"] == 3
+    assert slept == [0.75, 0.75]
+
+
+def test_llm_503_invalid_retry_after_falls_back_to_exponential_delay(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    attempts = {"count": 0}
+    slept: list[float] = []
+    monkeypatch.setattr("eoditdeora.runtime.clients.time.sleep", slept.append)
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        return httpx.Response(
+            503,
+            text="upstream overloaded",
+            headers={"retry-after": "not-a-number"},
+        )
+
+    client = LlmClient("127.0.0.1", 0)
+    client._client = _mock_client(handler)  # type: ignore[attr-defined]
+    with pytest.raises(RpcError) as ei:
+        client.chat("s", "u")
+    assert ei.value.code == ERR_UPSTREAM_UNAVAILABLE
+    assert attempts["count"] == 3
+    assert slept == [0.2, 0.4]
+
+
 def test_llm_400_generic_4xx_raises_bad_request():
     def handler(_req: httpx.Request) -> httpx.Response:
         return httpx.Response(400, json={"error": {"message": "model is required"}})
