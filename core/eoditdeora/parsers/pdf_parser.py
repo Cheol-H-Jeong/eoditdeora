@@ -39,8 +39,23 @@ class PdfTextLayerParser:
                 )
             )
 
-        raw = path.read_bytes()
-        if not raw:
+        try:
+            size_bytes = path.stat().st_size
+        except OSError as e:
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="pdf",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status="parser_error",
+                    warnings=[f"pdf_stat_failed: {e}"],
+                )
+            )
+
+        if size_bytes == 0:
             return ParseResult(
                 doc=ParsedDoc(
                     doc_id=doc_id,
@@ -53,7 +68,25 @@ class PdfTextLayerParser:
                     warnings=["empty_file"],
                 )
             )
-        if raw[:5] != b"%PDF-":
+
+        try:
+            with path.open("rb") as fp:
+                header = fp.read(5)
+        except OSError as e:
+            return ParseResult(
+                doc=ParsedDoc(
+                    doc_id=doc_id,
+                    source_path=str(path),
+                    source_path_display=display_path(path),
+                    format="pdf",
+                    parser=self.name,
+                    fidelity=self.fidelity,
+                    parse_status="parser_error",
+                    warnings=[f"pdf_open_failed: {e}"],
+                )
+            )
+
+        if header != b"%PDF-":
             return ParseResult(
                 doc=ParsedDoc(
                     doc_id=doc_id,

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from eoditdeora.parsers.pdf_parser import PdfTextLayerParser
 
 from .fixtures import make_pdf
@@ -30,3 +32,16 @@ def test_pdf_reports_no_ocr_needed_for_text_layer(tmp_path: Path):
     path = make_pdf(tmp_path / "t.pdf", ["Has content"])
     res = PdfTextLayerParser().parse(path, doc_id="sha256:" + "d" * 64)
     assert not any("ocr_needed" in w for w in res.doc.warnings)
+
+
+def test_pdf_preflight_avoids_reading_entire_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    path = tmp_path / "fake.pdf"
+    path.write_bytes(b"%PDF-1.7\nnot really a pdf body")
+
+    def _read_bytes(self: Path) -> bytes:
+        raise AssertionError("read_bytes should not be used for PDF preflight")
+
+    monkeypatch.setattr(Path, "read_bytes", _read_bytes)
+
+    res = PdfTextLayerParser().parse(path, doc_id="sha256:" + "e" * 64)
+    assert res.doc.parse_status in {"parser_error", "invalid_format"}
