@@ -5,6 +5,7 @@
     autostartDisable,
     autostartEnable,
     autostartStatus,
+    endpointsAutoConnect,
     endpointsDiscover,
     endpointsHealth,
     endpointsTest,
@@ -12,6 +13,7 @@
     getSettings,
     indexStatus,
     removeRoot,
+    type AutoConnectResult,
     type AutostartStatus,
     type Endpoint,
     type EndpointHealth,
@@ -38,6 +40,8 @@
   let health = $state<Record<Role, EndpointHealth | null>>({ llm: null, embed: null, rerank: null });
   let discovered = $state<ProbeResult[]>([]);
   let discovering = $state(false);
+  let autoConnectMsg = $state<string>("");
+  let autoConnecting = $state(false);
 
   let newPath = $state("");
   let busy = $state<Record<string, boolean>>({});
@@ -113,6 +117,27 @@
       discovered = r.endpoints;
     } finally {
       discovering = false;
+    }
+  }
+
+  async function onAutoConnect(force: boolean) {
+    autoConnecting = true;
+    autoConnectMsg = "";
+    try {
+      const r: AutoConnectResult = await endpointsAutoConnect(force);
+      const assigned = Object.keys(r.assigned);
+      if (assigned.length === 0) {
+        autoConnectMsg = r.probed === 0
+          ? "127.0.0.1 에 서빙 중인 OpenAI 호환 엔드포인트가 없습니다."
+          : "이미 모든 역할이 설정되어 있어 변경된 건 없습니다.";
+      } else {
+        autoConnectMsg = `자동 연결됨: ${assigned.join(", ")}`;
+      }
+      await refresh();
+    } catch (e) {
+      autoConnectMsg = String(e);
+    } finally {
+      autoConnecting = false;
     }
   }
 
@@ -210,10 +235,24 @@
     </p>
 
     <div class="discover-row">
-      <button onclick={onDiscover} disabled={discovering}>
-        {discovering ? "탐색 중..." : "자동 탐색"}
+      <button onclick={() => onAutoConnect(false)} disabled={autoConnecting}>
+        {autoConnecting ? "연결 중..." : "자동 연결"}
       </button>
-      <span class="hint small">127.0.0.1 의 주요 포트 조회</span>
+      <button
+        class="cancel"
+        onclick={() => onAutoConnect(true)}
+        disabled={autoConnecting}
+        title="이미 지정된 역할도 무시하고 다시 할당"
+      >강제 재연결</button>
+    </div>
+    {#if autoConnectMsg}
+      <p class="hint small">{autoConnectMsg}</p>
+    {/if}
+    <div class="discover-row">
+      <button class="cancel" onclick={onDiscover} disabled={discovering}>
+        {discovering ? "탐색 중..." : "서버 목록만 보기"}
+      </button>
+      <span class="hint small">수동 선택용</span>
     </div>
 
     {#if discovered.length}

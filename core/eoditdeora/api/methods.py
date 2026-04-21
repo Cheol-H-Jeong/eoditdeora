@@ -162,6 +162,19 @@ async def _endpoints_test(params: dict[str, Any]) -> dict[str, Any]:
     return probe(base_url, api_key=api_key, api_kind=api_kind).to_dict()
 
 
+async def _endpoints_auto_connect(params: dict[str, Any]) -> dict[str, Any]:
+    """Re-run the auto-connection scan on demand.
+
+    Params:
+      force (bool) — when true, reassign every role even if the user
+                     had already set one. Default false (only fills
+                     empty roles).
+    """
+    from eoditdeora.runtime.auto_connect import auto_connect
+
+    return auto_connect(force=bool(params.get("force")))
+
+
 async def _endpoints_update(params: dict[str, Any]) -> dict[str, Any]:
     """Write one role's endpoint config.
 
@@ -188,16 +201,20 @@ async def _endpoints_update(params: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "role": role, "endpoint": endpoint.model_dump(mode="json")}
 
 
-async def _first_run_bootstrap(_: dict[str, Any]) -> dict[str, Any]:
+async def _first_run_bootstrap(params: dict[str, Any]) -> dict[str, Any]:
     """Idempotent first-launch bootstrap.
 
     Safe to call on every launch: if a default root already exists we
-    don't re-add it, if autostart is already on we skip.
+    don't re-add it, if autostart is already on we skip, if an endpoint
+    role is already configured we leave it alone.
+
+    params.force_reconnect=true → reassign every role even if set.
     """
     from pathlib import Path
 
     from eoditdeora.collector.service import add_root
     from eoditdeora.config import load_settings
+    from eoditdeora.runtime.auto_connect import auto_connect
     from eoditdeora.runtime.autostart import enable as enable_autostart
     from eoditdeora.runtime.autostart import status as autostart_status
 
@@ -216,7 +233,18 @@ async def _first_run_bootstrap(_: dict[str, Any]) -> dict[str, Any]:
         enable_autostart()
         actions.append("autostart_enabled")
 
-    return {"actions": actions, "roots": load_settings().index.roots}
+    # Scan localhost and auto-assign any unconfigured LLM/embed/rerank
+    # role to an already-running server. Never overwrites explicit
+    # settings unless force_reconnect is set.
+    force = bool(params.get("force_reconnect"))
+    ac = auto_connect(force=force)
+    actions.extend([str(a) for a in ac.get("actions", [])])
+
+    return {
+        "actions": actions,
+        "roots": load_settings().index.roots,
+        "auto_connect": ac,
+    }
 
 
 def register_all(server: RpcServer) -> None:
@@ -235,6 +263,7 @@ def register_all(server: RpcServer) -> None:
     server.register("endpoints.discover", _endpoints_discover)
     server.register("endpoints.test", _endpoints_test)
     server.register("endpoints.update", _endpoints_update)
+    server.register("endpoints.auto_connect", _endpoints_auto_connect)
     server.register("first_run.bootstrap", _first_run_bootstrap)
     server.register("forget", _forget)
     server.register("open_file", _open_file)

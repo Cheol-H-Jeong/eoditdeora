@@ -137,6 +137,17 @@ export async function endpointsUpdate(role: Role, endpoint: Endpoint): Promise<u
   return rpc("endpoints.update", { role, endpoint });
 }
 
+export type AutoConnectResult = {
+  actions: string[];
+  assigned: Record<string, { base_url: string; model_id: string; api_kind: string }>;
+  probed: number;
+  well_known_scanned: number;
+};
+
+export async function endpointsAutoConnect(force = false): Promise<AutoConnectResult> {
+  return rpc<AutoConnectResult>("endpoints.auto_connect", { force });
+}
+
 export type Settings = {
   model: {
     llm: Endpoint;
