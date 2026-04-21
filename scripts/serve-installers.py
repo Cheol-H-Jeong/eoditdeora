@@ -241,12 +241,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
 
 def main() -> int:
+    import time
+
     parser = argparse.ArgumentParser(description="Serve installer files on LAN")
     parser.add_argument("--port", type=int, default=7118)
     parser.add_argument(
         "--from-release",
         action="store_true",
         help="Download the latest v* Release assets first (private repo OK via GH_TOKEN).",
+    )
+    parser.add_argument(
+        "--wait",
+        action="store_true",
+        help="If the Release has no assets yet, poll until CI finishes (every 30s).",
     )
     parser.add_argument(
         "--dir",
@@ -259,22 +266,29 @@ def main() -> int:
         INSTALLER_DIRS.append(args.dir.resolve())
 
     files = find_local()
-    if args.from_release or not files:
-        try:
-            print("Fetching latest Release assets…")
-            cache_dir = ROOT / "installers" / "_release-cache"
-            new_files = fetch_release_assets(cache_dir)
-            if new_files:
-                INSTALLER_DIRS.append(cache_dir)
-                files = find_local()
-        except Exception as e:  # noqa: BLE001
-            print(f"! release fetch failed: {e}", file=sys.stderr)
+    cache_dir = ROOT / "installers" / "_release-cache"
+    if args.from_release or args.wait or not files:
+        backoff = 30
+        while True:
+            try:
+                print("Fetching latest Release assets…")
+                new_files = fetch_release_assets(cache_dir)
+                if new_files:
+                    INSTALLER_DIRS.append(cache_dir)
+                    files = find_local()
+                if files:
+                    break
+            except Exception as e:  # noqa: BLE001
+                print(f"! release fetch: {e}", file=sys.stderr)
+            if not args.wait:
+                break
+            print(f"  Not ready yet. Polling again in {backoff}s. (Ctrl-C to stop.)")
+            time.sleep(backoff)
     if not files:
         print(
-            "No installer files found. Either build one with\n"
-            "  installers/linux/build-appimage.sh   (Linux AppImage)\n"
-            "  installers/windows/build-installer.ps1  (Windows EXE)\n"
-            "or wait for CI to finish and rerun with --from-release.",
+            "No installer files found. Either build one locally or rerun\n"
+            "with --wait to poll for the Release to finish:\n"
+            "  python scripts/serve-installers.py --wait",
             file=sys.stderr,
         )
         return 2
