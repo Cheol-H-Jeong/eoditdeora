@@ -1,4 +1,6 @@
 from pathlib import Path
+import sys
+import types
 
 import pytest
 
@@ -32,6 +34,58 @@ def test_pdf_reports_no_ocr_needed_for_text_layer(tmp_path: Path):
     path = make_pdf(tmp_path / "t.pdf", ["Has content"])
     res = PdfTextLayerParser().parse(path, doc_id="sha256:" + "d" * 64)
     assert not any("ocr_needed" in w for w in res.doc.warnings)
+
+
+def test_pdf_table_only_page_does_not_trigger_ocr_needed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    path = tmp_path / "table-only.pdf"
+    path.write_bytes(b"%PDF-1.4\n%fake but header-valid\n")
+
+    fake_pdfium = types.ModuleType("pypdfium2")
+
+    class _FakePdfiumDoc:
+        encryption = None
+
+        def __init__(self, _path: str) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    fake_pdfium.PdfDocument = _FakePdfiumDoc  # type: ignore[attr-defined]
+
+    fake_pdfplumber = types.ModuleType("pdfplumber")
+
+    class _FakePage:
+        def extract_text(self) -> str:
+            return ""
+
+        def extract_tables(self) -> list[list[list[str]]]:
+            return [[["항목", "금액"], ["예산안", "120000000"]]]
+
+    class _FakePdf:
+        metadata = {}
+        pages = [_FakePage()]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    def _open(_path: str) -> _FakePdf:
+        return _FakePdf()
+
+    fake_pdfplumber.open = _open  # type: ignore[attr-defined]
+
+    monkeypatch.setitem(sys.modules, "pypdfium2", fake_pdfium)
+    monkeypatch.setitem(sys.modules, "pdfplumber", fake_pdfplumber)
+
+    res = PdfTextLayerParser().parse(path, doc_id="sha256:" + "f" * 64)
+
+    assert not any("ocr_needed" in w for w in res.doc.warnings)
+    assert any(block.type == "table" and "예산안" in block.text for block in res.doc.blocks)
 
 
 def test_pdf_preflight_avoids_reading_entire_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

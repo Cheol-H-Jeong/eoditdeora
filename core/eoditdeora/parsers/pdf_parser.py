@@ -194,14 +194,17 @@ class PdfTextLayerParser:
             empty_pages = 0
             for page_no, page in enumerate(pdf.pages, start=1):
                 text = (page.extract_text() or "").strip()
+                page_has_content = False
                 if text:
                     blocks.append(Block(type="paragraph", text=text, page=page_no))
-                else:
-                    empty_pages += 1
+                    page_has_content = True
                 for table in page.extract_tables() or []:
                     flat = "\n".join("\t".join((c or "").strip() for c in row) for row in table)
                     if flat.strip():
                         blocks.append(Block(type="table", text=flat, page=page_no))
+                        page_has_content = True
+                if not page_has_content:
+                    empty_pages += 1
             if empty_pages:
                 warnings.append(f"ocr_needed: {empty_pages}_pages_had_no_text_layer")
 
