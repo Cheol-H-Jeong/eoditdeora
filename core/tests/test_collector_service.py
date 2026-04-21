@@ -8,6 +8,7 @@ import pytest
 
 from eoditdeora.collector.service import add_root, remove_root, status
 from eoditdeora.config import load_settings
+from eoditdeora.storage.fast_index import FastIndex
 
 
 @pytest.mark.asyncio
@@ -78,11 +79,22 @@ async def test_add_root_rejects_parent_of_existing_root(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_remove_root(tmp_path: Path):
     await add_root(str(tmp_path))
+    idx = FastIndex()
+    try:
+        idx.upsert(str(tmp_path / "draft.txt"), 1, 100.0)
+    finally:
+        idx.close()
     r = await remove_root(str(tmp_path))
     assert r["ok"] is True
     assert r["removed"] == 1
+    assert r["fast_index_removed"] == 1
     s = load_settings()
     assert str(tmp_path.resolve()) not in s.index.roots
+    idx = FastIndex()
+    try:
+        assert idx.search("draft") == []
+    finally:
+        idx.close()
 
 
 @pytest.mark.asyncio

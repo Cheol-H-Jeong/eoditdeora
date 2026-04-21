@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from eoditdeora.config import load_settings, save_settings
+from eoditdeora.storage.fast_index import FastIndex
 from eoditdeora.utils.logging import get_logger
 from eoditdeora.utils.paths_util import normalize_path
 
@@ -59,9 +60,16 @@ async def remove_root(path: str) -> dict[str, Any]:
     ]
     removed = before - len(settings.index.roots)
     save_settings(settings)
+    removed_fast_rows = 0
+    if removed:
+        fast = FastIndex()
+        try:
+            removed_fast_rows = fast.delete_under(abs_path)
+        finally:
+            fast.close()
     log.info("root_removed", path=str(abs_path), removed=removed)
     _refresh_indexer_daemon()
-    return {"ok": True, "removed": removed}
+    return {"ok": True, "removed": removed, "fast_index_removed": removed_fast_rows}
 
 
 def _refresh_indexer_daemon() -> None:
