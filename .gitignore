@@ -47,3 +47,4 @@ installers/**/out/
 *.deb
 *.rpm
 *.dmg
+.demo-home/

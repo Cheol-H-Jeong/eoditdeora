@@ -13,7 +13,9 @@ export async function rpc<T = unknown>(
 }
 
 export async function openInOs(path: string): Promise<void> {
-  await invoke("open_in_os", { path });
+  // Route through the Python sidecar so the dev bridge, Tauri shell,
+  // and future native hosts all end up in the same code path.
+  await rpc("open_file", { path });
 }
 
 // ---- typed helpers ---------------------------------------------------------

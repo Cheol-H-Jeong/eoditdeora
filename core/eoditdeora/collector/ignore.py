@@ -57,7 +57,28 @@ class IgnoreMatcher:
 
     def ignored(self, path: Path) -> bool:
         try:
-            rel = path.resolve().relative_to(self._root)
+            resolved = path.resolve()
+        except OSError:
+            return True
+        # Defense-in-depth: if the user's watched root is OUTSIDE our app
+        # data directory, protect the app data from being crawled (e.g.
+        # they added ~/home as a root — don't index ~/.local/share/eddr/).
+        # If the root IS inside the app data dir (e.g. tests that use
+        # tmp_path as both), trust the user and do not auto-protect.
+        try:
+            from eoditdeora.config.paths import get_paths
+
+            app_root = get_paths().root.resolve()
+            root_is_inside_app = (
+                self._root == app_root or app_root in self._root.parents
+            )
+            if not root_is_inside_app:
+                if resolved == app_root or app_root in resolved.parents:
+                    return True
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            rel = resolved.relative_to(self._root)
         except ValueError:
             return False
         return self._spec.match_file(rel.as_posix())

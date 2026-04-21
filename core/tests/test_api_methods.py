@@ -38,19 +38,24 @@ async def test_settings_update_persists():
 
 @pytest.mark.asyncio
 async def test_index_add_root_and_status(tmp_path: Path):
+    # Use a subdirectory so the live-watcher daemon has nothing to index.
+    docs = tmp_path / "watched"
+    docs.mkdir()
     server = RpcServer()
-    resp = await _call(server, "index.add_root", {"path": str(tmp_path)})
+    resp = await _call(server, "index.add_root", {"path": str(docs)})
     assert resp["result"]["ok"] is True
     status = (await _call(server, "index.status"))["result"]
-    assert str(tmp_path.resolve()) in status["roots"]
+    assert str(docs.resolve()) in status["roots"]
     assert status["index"]["doc_count"] == 0
 
 
 @pytest.mark.asyncio
 async def test_index_remove_root(tmp_path: Path):
+    docs = tmp_path / "watched"
+    docs.mkdir()
     server = RpcServer()
-    await _call(server, "index.add_root", {"path": str(tmp_path)})
-    resp = await _call(server, "index.remove_root", {"path": str(tmp_path)})
+    await _call(server, "index.add_root", {"path": str(docs)})
+    resp = await _call(server, "index.remove_root", {"path": str(docs)})
     assert resp["result"]["removed"] == 1
 
 

@@ -136,6 +136,14 @@ def _write_message(writer: asyncio.StreamWriter, payload: dict[str, Any]) -> Non
 async def run_stdio() -> None:
     configure_logging()
     server = RpcServer()
+    # Start the live indexer alongside the RPC loop so filesystem events
+    # are observed from the first moment the UI is reachable.
+    try:
+        from eoditdeora.indexer.daemon import get_daemon
+
+        get_daemon().start()
+    except Exception as e:  # noqa: BLE001
+        log.warning("daemon_start_failed", error=str(e))
     loop = asyncio.get_event_loop()
 
     reader = asyncio.StreamReader()

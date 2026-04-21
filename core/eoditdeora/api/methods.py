@@ -73,6 +73,80 @@ async def _forget(params: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+async def _open_file(params: dict[str, Any]) -> dict[str, Any]:
+    """Launch a file with the OS default application.
+
+    Linux  → xdg-open
+    macOS  → open
+    Windows→ start (via `os.startfile`)
+
+    Only paths that exist on disk are opened; anything else returns
+    a structured error so the UI can surface it.
+    """
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from eoditdeora.api.rpc_server import ERR_INVALID_PARAMS, RpcError
+
+    raw = params.get("path")
+    if not raw:
+        raise RpcError(ERR_INVALID_PARAMS, "missing 'path'")
+    target = Path(str(raw)).expanduser()
+    if not target.exists():
+        return {"ok": False, "error": "not_found", "path": str(target)}
+
+    try:
+        if sys.platform == "win32":
+            os.startfile(str(target))  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(target)], close_fds=True)  # noqa: S603,S607
+        else:
+            subprocess.Popen(  # noqa: S603
+                ["xdg-open", str(target)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+                start_new_session=True,
+            )
+    except FileNotFoundError as e:
+        return {"ok": False, "error": "launcher_missing", "detail": str(e)}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "spawn_failed", "detail": str(e)}
+    return {"ok": True, "path": str(target)}
+
+
+async def _indexer_status(_: dict[str, Any]) -> dict[str, Any]:
+    from eoditdeora.indexer.daemon import get_daemon
+
+    return {"running": True, "stats": get_daemon().stats()}
+
+
+async def _autostart_enable(_: dict[str, Any]) -> dict[str, Any]:
+    from eoditdeora.runtime.autostart import enable
+
+    return dict(enable())
+
+
+async def _autostart_disable(_: dict[str, Any]) -> dict[str, Any]:
+    from eoditdeora.runtime.autostart import disable
+
+    return dict(disable())
+
+
+async def _autostart_status(_: dict[str, Any]) -> dict[str, Any]:
+    from eoditdeora.runtime.autostart import status
+
+    return dict(status())
+
+
+async def _llm_ensure(_: dict[str, Any]) -> dict[str, Any]:
+    from eoditdeora.runtime.supervisor import RuntimeSupervisor
+
+    return {"backends": RuntimeSupervisor().ensure_running()}
+
+
 def register_all(server: RpcServer) -> None:
     server.register("ping", _ping)
     server.register("settings.get", _get_settings)
@@ -81,4 +155,10 @@ def register_all(server: RpcServer) -> None:
     server.register("index.add_root", _index_add_root)
     server.register("index.remove_root", _index_remove_root)
     server.register("index.status", _index_status)
+    server.register("indexer.status", _indexer_status)
+    server.register("autostart.enable", _autostart_enable)
+    server.register("autostart.disable", _autostart_disable)
+    server.register("autostart.status", _autostart_status)
+    server.register("llm.ensure", _llm_ensure)
     server.register("forget", _forget)
+    server.register("open_file", _open_file)

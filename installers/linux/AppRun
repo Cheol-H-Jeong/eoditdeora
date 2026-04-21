@@ -1,0 +1,16 @@
+#!/bin/bash
+# AppImage entrypoint for 어딨더라.
+# Resolves the bundled executable and forwards all arguments.
+set -e
+HERE="$(dirname "$(readlink -f "${0}")")"
+
+# Qt platform plugins live inside the PyInstaller distribution.
+export QT_QPA_PLATFORM_PLUGIN_PATH="${HERE}/usr/bin/_internal/PyQt6/Qt6/plugins/platforms"
+export QTWEBENGINEPROCESS_PATH="${HERE}/usr/bin/_internal/PyQt6/Qt6/libexec/QtWebEngineProcess"
+export LD_LIBRARY_PATH="${HERE}/usr/bin/_internal:${LD_LIBRARY_PATH:-}"
+# Qt WebEngine needs writable cache.
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/runtime-$(id -u)}"
+mkdir -p "${XDG_RUNTIME_DIR}"
+chmod 700 "${XDG_RUNTIME_DIR}" || true
+
+exec "${HERE}/usr/bin/eoditdeora" "$@"

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Eoditdeora
+GenericName=어딨더라
+Comment=Local document knowledge base with semantic search and RAG
+Exec=AppRun %U
+Icon=eoditdeora
+Categories=Office;Utility;
+Terminal=false
+StartupNotify=false
+StartupWMClass=Eoditdeora

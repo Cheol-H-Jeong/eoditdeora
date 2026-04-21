@@ -166,6 +166,16 @@ class RuntimeSupervisor:
         p = self._procs.get(backend)
         return p is not None and p.poll() is None
 
+    def ensure_running(self) -> dict[str, bool]:
+        """Bring up any backend that isn't already alive.
+
+        Used by the desktop launcher on startup (including boot autostart)
+        so users never have to hand-start the LLM. Returns a map of
+        backend → is_running after the attempt.
+        """
+        self.start_all()
+        return {c.name: self.is_running(c.name) for c in self._configs}
+
     def port(self, backend: str) -> int:
         return next(c.port for c in self._configs if c.name == backend)
 

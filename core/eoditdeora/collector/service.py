@@ -24,9 +24,8 @@ async def add_root(path: str) -> dict[str, Any]:
     settings.index.roots.append(str(abs_path))
     save_settings(settings)
     log.info("root_added", path=str(abs_path))
-    # Indexer pickup happens via the orchestrator; in the sidecar skeleton
-    # we surface the registration immediately and let the background loop
-    # start scanning on next tick.
+    # Kick the indexer daemon so it starts watching this root right away.
+    _refresh_indexer_daemon()
     return {"ok": True, "path": str(abs_path)}
 
 
@@ -40,7 +39,19 @@ async def remove_root(path: str) -> dict[str, Any]:
     removed = before - len(settings.index.roots)
     save_settings(settings)
     log.info("root_removed", path=str(abs_path), removed=removed)
+    _refresh_indexer_daemon()
     return {"ok": True, "removed": removed}
+
+
+def _refresh_indexer_daemon() -> None:
+    # Imported lazily so test helpers that don't want the daemon can
+    # still use the service functions.
+    from eoditdeora.indexer.daemon import get_daemon
+
+    try:
+        get_daemon().refresh_roots()
+    except Exception as e:  # noqa: BLE001
+        log.warning("daemon_refresh_failed", error=str(e))
 
 
 async def status() -> dict[str, Any]:
