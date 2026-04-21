@@ -6,14 +6,138 @@ thin; delegate heavy lifting to feature modules.
 
 from __future__ import annotations
 
+import os
+import shutil
+import threading
+import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from eoditdeora import __version__
 from eoditdeora.config import load_settings, save_settings
+from eoditdeora.config.paths import get_paths
 from eoditdeora.config.settings import Settings
 
 if TYPE_CHECKING:
     from eoditdeora.api.rpc_server import RpcServer
+
+
+_DISK_USAGE_TTL_SECONDS = 10.0
+_DISK_USAGE_CACHE_LOCK = threading.Lock()
+_DISK_USAGE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_DISK_USAGE_BUCKETS = (
+    "meta",
+    "fts",
+    "vectors",
+    "fast_index",
+    "history",
+    "schema",
+    "other",
+)
+
+
+def _bucket_for_path(index_dir: Path, path: Path) -> str:
+    rel = path.relative_to(index_dir)
+    top = rel.parts[0] if rel.parts else ""
+    name = rel.name.lower()
+    top_lower = top.lower()
+    if top_lower in {"tantivy", "fts"}:
+        return "fts"
+    if top_lower in {"lancedb", "vectors"} or top_lower.startswith("lance"):
+        return "vectors"
+    if name.startswith("meta.sqlite3"):
+        return "meta"
+    if name.startswith("history.sqlite3"):
+        return "history"
+    if name.startswith("schema.sqlite3"):
+        return "schema"
+    if name == "fast_index.db" or name.startswith("fast_index.db-"):
+        return "fast_index"
+    return "other"
+
+
+def _scan_index_disk_usage(index_dir: Path) -> dict[str, Any]:
+    by_store = {bucket: 0 for bucket in _DISK_USAGE_BUCKETS}
+    if index_dir.exists():
+        for root, _dirs, files in os.walk(index_dir):
+            root_path = Path(root)
+            for filename in files:
+                path = root_path / filename
+                try:
+                    size = path.stat().st_size
+                except OSError:
+                    continue
+                by_store[_bucket_for_path(index_dir, path)] += int(size)
+    return {
+        "total_bytes": int(sum(by_store.values())),
+        "by_store": by_store,
+        "index_dir": str(index_dir),
+    }
+
+
+def _cached_index_disk_usage(index_dir: Path) -> dict[str, Any]:
+    key = str(index_dir.resolve())
+    now = time.monotonic()
+    with _DISK_USAGE_CACHE_LOCK:
+        cached = _DISK_USAGE_CACHE.get(key)
+        if cached is not None and now - cached[0] < _DISK_USAGE_TTL_SECONDS:
+            return cached[1]
+    result = _scan_index_disk_usage(index_dir)
+    with _DISK_USAGE_CACHE_LOCK:
+        _DISK_USAGE_CACHE[key] = (now, result)
+    return result
+
+
+def _clear_index_disk_usage_cache(index_dir: Path | None = None) -> None:
+    with _DISK_USAGE_CACHE_LOCK:
+        if index_dir is None:
+            _DISK_USAGE_CACHE.clear()
+            return
+        _DISK_USAGE_CACHE.pop(str(index_dir.resolve()), None)
+
+
+def _path_size(path: Path) -> int:
+    if not path.exists():
+        return 0
+    if path.is_file():
+        try:
+            return int(path.stat().st_size)
+        except OSError:
+            return 0
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        root_path = Path(root)
+        for filename in files:
+            try:
+                total += int((root_path / filename).stat().st_size)
+            except OSError:
+                continue
+    return total
+
+
+def _reset_index_dir(index_dir: Path) -> int:
+    deleted_bytes = 0
+    for path in index_dir.glob("*.sqlite3*"):
+        deleted_bytes += _path_size(path)
+        if path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            path.unlink(missing_ok=True)
+    fast_index_db = index_dir / "fast_index.db"
+    for path in (fast_index_db, *index_dir.glob("fast_index.db-*")):
+        deleted_bytes += _path_size(path)
+        if path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            path.unlink(missing_ok=True)
+    for path in index_dir.iterdir() if index_dir.exists() else ():
+        if not path.is_dir():
+            continue
+        name = path.name.lower()
+        if name in {"fts", "vectors", "tantivy"} or name.startswith("lance"):
+            deleted_bytes += _path_size(path)
+            shutil.rmtree(path, ignore_errors=True)
+    return deleted_bytes
 
 
 async def _ping(_: dict[str, Any]) -> dict[str, Any]:
@@ -113,6 +237,31 @@ async def _index_status(_: dict[str, Any]) -> dict[str, Any]:
     from eoditdeora.collector.service import status
 
     return await status()
+
+
+async def _index_disk_usage(_: dict[str, Any]) -> dict[str, Any]:
+    return _cached_index_disk_usage(get_paths().index)
+
+
+async def _index_reset(params: dict[str, Any]) -> dict[str, Any]:
+    from eoditdeora.api.rpc_server import ERR_INVALID_PARAMS, RpcError
+    from eoditdeora.indexer.daemon import get_daemon
+
+    if params.get("confirm") is not True:
+        raise RpcError(ERR_INVALID_PARAMS, "confirm must be true")
+
+    daemon = get_daemon()
+    index_dir = get_paths().index
+    daemon.stop()
+    deleted_bytes = _reset_index_dir(index_dir)
+    _clear_index_disk_usage_cache(index_dir)
+    restarted = False
+    try:
+        daemon.start()
+        restarted = True
+    finally:
+        _clear_index_disk_usage_cache(index_dir)
+    return {"ok": True, "deleted_bytes": int(deleted_bytes), "restarted": restarted}
 
 
 async def _forget(params: dict[str, Any]) -> dict[str, Any]:
@@ -426,6 +575,8 @@ def register_all(server: RpcServer) -> None:
     server.register("index.add_root", _index_add_root)
     server.register("index.remove_root", _index_remove_root)
     server.register("index.status", _index_status)
+    server.register("index.disk_usage", _index_disk_usage)
+    server.register("index.reset", _index_reset)
     server.register("indexer.status", _indexer_status)
     server.register("autostart.enable", _autostart_enable)
     server.register("autostart.disable", _autostart_disable)

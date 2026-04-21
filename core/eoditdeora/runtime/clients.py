@@ -12,6 +12,7 @@ a role is not configured, so callers short-circuit gracefully.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import httpx
@@ -132,6 +133,7 @@ class _EndpointClient:
         if not endpoint.base_url:
             raise ValueError("endpoint is not configured")
         self._endpoint = endpoint
+        self._timeout = timeout
         self._client = httpx.Client(
             timeout=timeout, headers=_auth_headers(endpoint.api_key)
         )
@@ -182,6 +184,75 @@ class LlmClient(_EndpointClient):
         if not content:
             content = msg.get("reasoning_content") or msg.get("reasoning") or ""
         return str(content)
+
+    def chat_stream(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float = 0.2,
+        max_tokens: int = 1024,
+        stop: list[str] | None = None,
+        response_format: dict[str, Any] | None = None,
+    ):
+        body: dict[str, Any] = {
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+        if self._endpoint.model_id:
+            body["model"] = self._endpoint.model_id
+        if stop:
+            body["stop"] = stop
+        if response_format:
+            body["response_format"] = response_format
+
+        url = resolve_chat_url(self._endpoint)
+        try:
+            with httpx.stream(
+                "POST",
+                url,
+                json=body,
+                headers=_auth_headers(self._endpoint.api_key),
+                timeout=self._timeout,
+            ) as r:
+                _raise_upstream_for_status(r, url, "llm")
+                for line in r.iter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    payload = line[5:].strip()
+                    if payload == "[DONE]":
+                        return
+                    try:
+                        data = json.loads(payload)
+                    except ValueError as e:
+                        raise RpcError(
+                            ERR_UPSTREAM_BAD_RESPONSE,
+                            "추론 서버가 올바른 SSE JSON 청크를 돌려주지 않았습니다",
+                            {"url": url, "role": "llm"},
+                        ) from e
+                    choices = data.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta") or {}
+                    content = (
+                        delta.get("content")
+                        or delta.get("reasoning_content")
+                        or delta.get("reasoning")
+                        or ""
+                    )
+                    if content:
+                        yield str(content)
+        except httpx.HTTPError as e:
+            raise RpcError(
+                ERR_UPSTREAM_UNAVAILABLE,
+                "추론 서버에 연결할 수 없습니다",
+                {"url": url, "role": "llm", "detail": str(e)},
+            ) from e
 
 
 class EmbedClient(_EndpointClient):

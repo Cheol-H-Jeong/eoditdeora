@@ -30,7 +30,7 @@
 chmod +x ./Eoditdeora-<version>-x86_64.AppImage
 ```
 
-4. 파일 관리자에서 더블클릭하거나, 터미널에서 직접 실행합니다.
+1. 파일 관리자에서 더블클릭하거나, 터미널에서 직접 실행합니다.
 
 ```bash
 ./Eoditdeora-<version>-x86_64.AppImage
@@ -62,7 +62,9 @@ chmod +x ./Eoditdeora-<version>-x86_64.AppImage
 
 ## 로컬 llama-server 예시
 
-아래 예시는 `llama.cpp`의 `llama-server`를 역할별로 3개 포트에 나누어 띄우는 가장 단순한 형태입니다. 모델 파일명과 GPU 옵션은 환경에 맞게 바꿔서 사용하세요.
+아래 예시는 `llama.cpp`의 `llama-server`를 역할별로 3개 포트에
+나누어 띄우는 가장 단순한 형태입니다. 모델 파일명과 GPU 옵션은
+환경에 맞게 바꿔서 사용하세요.
 
 LLM 서버:
 
@@ -107,7 +109,9 @@ llama-server \
 - `리랭커 (정렬용)`: `http://127.0.0.1:8083`
 - `API key`: `YOUR_BEARER_KEY_HERE`
 
-`llama.cpp` 공식 문서 기준으로 임베딩 서버는 `--embedding --pooling cls`, 리랭커 서버는 `--reranking`과 rank 풀링 조합이 필요합니다.
+`llama.cpp` 공식 문서 기준으로 임베딩 서버는
+`--embedding --pooling cls`, 리랭커 서버는 `--reranking`과
+rank 풀링 조합이 필요합니다.
 
 참고:
 
@@ -128,7 +132,10 @@ Ollama를 이미 사용 중이면 아래처럼 시작하시면 됩니다.
 - `LLM (답변용)`: `http://127.0.0.1:11434/v1`
 - `임베딩 (의미 검색용)`: `http://127.0.0.1:11434/v1`
 
-리랭커는 별도 서버를 권장합니다. 현재 Ollama 공식 OpenAI 호환 문서는 채팅과 임베딩 중심으로 안내되어 있어, 이 앱의 리랭커 역할은 `llama.cpp`나 `vLLM` 같은 별도 엔드포인트를 두는 편이 안정적입니다. 이는 공식 문서 범위를 기준으로 한 권장 사항입니다.
+리랭커는 별도 서버를 권장합니다. 현재 Ollama 공식 OpenAI 호환 문서는
+채팅과 임베딩 중심으로 안내되어 있어, 이 앱의 리랭커 역할은
+`llama.cpp`나 `vLLM` 같은 별도 엔드포인트를 두는 편이 안정적입니다.
+이는 공식 문서 범위를 기준으로 한 권장 사항입니다.
 
 참고:
 

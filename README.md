@@ -4,7 +4,8 @@
 내 PC 또는 사내 PC의 문서를 색인해 파일명 검색, 본문 검색, AI 답변을 제공합니다.
 문서는 사용자가 지정한 LLM 서버로만 전달되며, 법인 망분리 환경을 우선으로 설계했습니다.
 
-English summary: A desktop search app for Korean office documents with local-first retrieval and evidence-based AI answers.
+English summary: A desktop search app for Korean office documents with
+local-first retrieval and evidence-based AI answers.
 
 ## 누구를 위한 것인가
 

@@ -130,6 +130,30 @@ export async function indexStatus(): Promise<IndexStatus> {
   return rpc<IndexStatus>("index.status");
 }
 
+export type IndexDiskUsage = {
+  total_bytes: number;
+  by_store: {
+    meta: number;
+    fts: number;
+    vectors: number;
+    fast_index: number;
+    history: number;
+    schema?: number;
+    other: number;
+  };
+  index_dir: string;
+};
+
+export async function indexDiskUsage(): Promise<IndexDiskUsage> {
+  return rpc<IndexDiskUsage>("index.disk_usage");
+}
+
+export async function indexReset(): Promise<{ ok: boolean; deleted_bytes: number; restarted: boolean }> {
+  return rpc<{ ok: boolean; deleted_bytes: number; restarted: boolean }>("index.reset", {
+    confirm: true,
+  });
+}
+
 export async function ping(): Promise<{ ok: boolean; version: string }> {
   return rpc("ping");
 }

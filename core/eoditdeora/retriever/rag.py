@@ -77,3 +77,33 @@ def answer_strict(question: str, hits: list[dict[str, Any]]) -> dict[str, Any]:
 
     answered = _NO_ANSWER_SENTINEL not in text
     return {"answered": answered, "answer": text, "citations": citations}
+
+
+def answer_strict_stream(question: str, hits: list[dict[str, Any]]):
+    if not hits:
+        yield {
+            "type": "chunk",
+            "text": "근거 문서에 해당 정보가 없어 답변할 수 없습니다.",
+        }
+        yield {"type": "done", "citations": []}
+        return
+
+    client = get_llm_client()
+    if client is None:
+        yield {"type": "error", "error": _NO_ENDPOINT_MSG}
+        return
+
+    evidence, citations = _build_evidence(hits)
+    user_prompt = RAG_STRICT_USER.format(question=question, evidence=evidence)
+    try:
+        for chunk in client.chat_stream(
+            RAG_STRICT_SYSTEM, user_prompt, temperature=0.1, max_tokens=1024
+        ):
+            if chunk:
+                yield {"type": "chunk", "text": chunk}
+        yield {"type": "done", "citations": citations}
+    except Exception as e:  # noqa: BLE001
+        log.warning("llm_chat_stream_failed", error=str(e))
+        yield {"type": "error", "error": f"LLM 엔드포인트 호출에 실패했습니다: {e}"}
+    finally:
+        client.close()

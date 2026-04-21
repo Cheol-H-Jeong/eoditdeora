@@ -15,6 +15,8 @@
     endpointsUpdate,
     filesStats,
     getSettings,
+    indexDiskUsage,
+    indexReset,
     indexRescan,
     indexStatus,
     removeRoot,
@@ -25,6 +27,7 @@
     type Endpoint,
     type EndpointHealth,
     type FastStats,
+    type IndexDiskUsage,
     type IndexStatus,
     type Preset,
     type ProbeResult,
@@ -60,7 +63,9 @@
   let timer: number | undefined;
   let docCandidates = $state<DocPathCandidate[]>([]);
   let fastStats = $state<FastStats | null>(null);
+  let diskUsage = $state<IndexDiskUsage | null>(null);
   let rescanMsg = $state<string>("");
+  let resetMsg = $state<string>("");
 
   // Extension picker state.
   const DEFAULT_EXTS: readonly string[] = [
@@ -94,6 +99,38 @@
 
   function extCountFor(ext: string): number {
     return fastStats?.by_ext.find((b) => b.ext === ext)?.count ?? 0;
+  }
+
+  function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    const units = ["KB", "MB", "GB", "TB"];
+    let value = bytes;
+    let unit = -1;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit += 1;
+    }
+    return `${value.toFixed(value >= 10 || unit < 1 ? 0 : 1)} ${units[unit]}`;
+  }
+
+  function usagePercent(bytes: number): number {
+    const total = diskUsage?.total_bytes ?? 0;
+    if (total <= 0) return 0;
+    return (bytes / total) * 100;
+  }
+
+  function usageRows(): Array<{ key: keyof IndexDiskUsage["by_store"]; label: string; bytes: number }> {
+    if (!diskUsage) return [];
+    const rows: Array<{ key: keyof IndexDiskUsage["by_store"]; label: string; bytes: number }> = [
+      { key: "meta", label: "메타", bytes: diskUsage.by_store.meta ?? 0 },
+      { key: "fts", label: "본문 검색", bytes: diskUsage.by_store.fts ?? 0 },
+      { key: "vectors", label: "벡터", bytes: diskUsage.by_store.vectors ?? 0 },
+      { key: "fast_index", label: "파일명", bytes: diskUsage.by_store.fast_index ?? 0 },
+      { key: "history", label: "기록", bytes: diskUsage.by_store.history ?? 0 },
+      { key: "schema", label: "스키마", bytes: diskUsage.by_store.schema ?? 0 },
+      { key: "other", label: "기타", bytes: diskUsage.by_store.other ?? 0 },
+    ];
+    return rows.filter((row) => row.bytes > 0 || row.key === "other");
   }
 
   async function saveExtensions(next: string[]) {
@@ -155,6 +192,11 @@
       } catch {
         fastStats = null;
       }
+      try {
+        diskUsage = await indexDiskUsage();
+      } catch {
+        diskUsage = null;
+      }
     } catch (e) {
       console.warn(e);
     }
@@ -195,6 +237,22 @@
       rescanMsg = String(e);
     } finally {
       busy = { ...busy, rescan: false };
+    }
+  }
+
+  async function onResetIndex() {
+    const ok = window.confirm("정말 초기화합니까? 색인이 삭제되고 재빌드됩니다.");
+    if (!ok) return;
+    busy = { ...busy, resetIndex: true };
+    resetMsg = "초기화 중...";
+    try {
+      const result = await indexReset();
+      resetMsg = `초기화 완료 · ${formatBytes(result.deleted_bytes)} 삭제 · ${result.restarted ? "재시작됨" : "재시작 실패"}`;
+      await refreshRuntime();
+    } catch (e) {
+      resetMsg = String(e);
+    } finally {
+      busy = { ...busy, resetIndex: false };
     }
   }
 
@@ -487,6 +545,41 @@
   </section>
 
   <section>
+    <h2>인덱스 관리</h2>
+    <p class="hint">현재 색인 저장소가 쓰는 디스크 용량입니다. 엉킨 경우 초기화하면 자동으로 다시 색인합니다.</p>
+    <div class="usage-card">
+      <div class="row">
+        <span class="name">총 사용량</span>
+        <span class="badge usage-total">{formatBytes(diskUsage?.total_bytes ?? 0)}</span>
+      </div>
+      <p class="hint small mono" title={diskUsage?.index_dir ?? ""}>{diskUsage?.index_dir ?? "경로 확인 중..."}</p>
+      {#if diskUsage}
+        <div class="usage-list">
+          {#each usageRows() as row}
+            <div class="usage-row">
+              <div class="row small">
+                <span>{row.label}</span>
+                <span>{formatBytes(row.bytes)}</span>
+              </div>
+              <div class="usage-bar">
+                <div class="usage-fill" style={`width: ${usagePercent(row.bytes)}%`}></div>
+              </div>
+            </div>
+          {/each}
+        </div>
+      {/if}
+      <div class="discover-row">
+        <button class="danger" onclick={onResetIndex} disabled={busy.resetIndex}>
+          {busy.resetIndex ? "초기화 중..." : "인덱스 초기화"}
+        </button>
+      </div>
+      {#if resetMsg}
+        <p class="hint small status-badge">{resetMsg}</p>
+      {/if}
+    </div>
+  </section>
+
+  <section>
     <h2>자동 시작</h2>
     {#if autostart}
       <label class="toggle">
@@ -679,6 +772,7 @@
   }
   .hint { margin: 0 0 10px; font-size: 11px; color: #8a94a3; line-height: 1.5; }
   .hint.small, .small { font-size: 10.5px; }
+  .mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
   .muted { color: #6b7280; }
   .err { color: #ff9c9c; }
   ul.roots {
@@ -713,7 +807,44 @@
   }
   button:disabled { opacity: 0.4; cursor: not-allowed; }
   button.cancel { background: #2a2f3a; color: #a0a6b0; }
+  button.danger { background: #8c2f39; color: #fff5f5; }
   .stat { margin: 6px 0 0; font-size: 11px; color: #8a94a3; }
+  .usage-card {
+    background: #141822;
+    border: 1px solid #1e2230;
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+  .usage-total { background: #18304c; color: #9dc6ff; }
+  .usage-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 10px 0;
+  }
+  .usage-row { display: flex; flex-direction: column; gap: 4px; }
+  .usage-bar {
+    width: 100%;
+    height: 8px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: #0f131b;
+    border: 1px solid #232836;
+  }
+  .usage-fill {
+    height: 100%;
+    min-width: 0;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #4b7bff 0%, #72c8ff 100%);
+  }
+  .status-badge {
+    display: inline-block;
+    margin-top: 4px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: #1f2330;
+    color: #c7cbd3;
+  }
   .ext-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
