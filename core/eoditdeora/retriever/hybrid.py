@@ -65,6 +65,8 @@ def hybrid_search(query: str, *, top_k: int = 10) -> list[dict[str, Any]]:
     sensible response for; the caller always gets back a list (possibly
     empty) and routes a warning through a separate channel instead.
     """
+    if top_k <= 0:
+        return []
     settings = load_settings()
 
     try:

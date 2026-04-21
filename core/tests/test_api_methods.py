@@ -72,6 +72,13 @@ async def test_search_returns_empty_for_blank_query():
 
 
 @pytest.mark.asyncio
+async def test_search_non_positive_top_k_returns_no_results():
+    server = RpcServer()
+    resp = await _call(server, "search", {"query": "예산", "top_k": -1})
+    assert resp["result"] == {"results": [], "query": "예산"}
+
+
+@pytest.mark.asyncio
 async def test_files_search_negative_limit_returns_no_rows():
     idx = FastIndex()
     try:

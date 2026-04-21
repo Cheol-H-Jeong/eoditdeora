@@ -31,7 +31,7 @@ def lexical_search(query: str, *, top_k: int = 20) -> list[dict[str, Any]]:
     taking the RPC loop down.
     """
     query = (query or "").strip()
-    if not query:
+    if not query or top_k <= 0:
         return []
 
     try:

@@ -65,3 +65,20 @@ async def test_ask_mode_includes_answer(monkeypatch: pytest.MonkeyPatch):
     result = await service_mod.search("질의", top_k=3, mode="ask")
     assert result["answer"]["answered"] is True
     assert result["answer"]["answer"] == "예 [§1]"
+
+
+@pytest.mark.asyncio
+async def test_search_with_non_positive_top_k_short_circuits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbid_lexical(*_a: Any, **_k: Any) -> list[dict[str, Any]]:
+        raise AssertionError("non-positive top_k must not call lexical_search")
+
+    def forbid_hybrid(*_a: Any, **_k: Any) -> list[dict[str, Any]]:
+        raise AssertionError("non-positive top_k must not call hybrid_search")
+
+    monkeypatch.setattr(service_mod, "lexical_search", forbid_lexical)
+    monkeypatch.setattr(service_mod, "hybrid_search", forbid_hybrid)
+
+    result = await service_mod.search("질의", top_k=0)
+    assert result == {"query": "질의", "results": []}

@@ -98,6 +98,8 @@ class FtsStore:
         writer.commit()
 
     def search(self, query_text: str, top_k: int = 50) -> list[dict[str, Any]]:
+        if top_k <= 0:
+            return []
         index = self._open()
         index.reload()
         parsed = parse_query(query_text)

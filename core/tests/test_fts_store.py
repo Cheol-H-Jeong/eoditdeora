@@ -63,3 +63,9 @@ def test_empty_query_returns_nothing(tmp_path: Path):
     store = FtsStore(index_dir=tmp_path / "tantivy")
     store.upsert([{"chunk_id": "c1", "doc_id": "d1", "text": "내용"}])
     assert store.search("", top_k=5) == []
+
+
+def test_non_positive_top_k_returns_nothing(tmp_path: Path):
+    store = FtsStore(index_dir=tmp_path / "tantivy")
+    store.upsert([{"chunk_id": "c1", "doc_id": "d1", "text": "내용"}])
+    assert store.search("내용", top_k=0) == []

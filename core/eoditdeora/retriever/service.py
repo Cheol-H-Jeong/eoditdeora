@@ -36,6 +36,8 @@ async def search(query: str, top_k: int = 10, mode: str = "search") -> dict[str,
     the actual problem without the app window disappearing.
     """
     use_hybrid = mode == "ask"
+    if top_k <= 0:
+        return {"query": query, "results": []}
     try:
         history = HistoryStore()
         try:
