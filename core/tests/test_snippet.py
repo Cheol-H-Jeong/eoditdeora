@@ -73,6 +73,24 @@ def test_synonym_expansion_marks_matching_office_term() -> None:
     assert "<mark>예산</mark>" in html_out
 
 
+def test_phrase_query_highlights_whole_phrase() -> None:
+    plain, html_out = make_snippet("결재 전 품의서 초안 검토가 필요합니다.", '"품의서 초안"')
+    assert "품의서 초안" in plain
+    assert "<mark>품의서 초안</mark>" in html_out
+
+
+def test_negative_terms_are_not_highlighted() -> None:
+    plain, html_out = make_snippet(
+        "예산 승인 후 취소 없이 집행 완료",
+        '예산 -"품의서 초안" -취소',
+    )
+    assert "<mark>예산</mark>" in html_out
+    assert "<mark>취소</mark>" not in html_out
+    assert "<mark>품의서</mark>" not in html_out
+    assert "<mark>초안</mark>" not in html_out
+    assert "취소" in plain
+
+
 def test_mark_tags_can_be_consumed_as_html_safely() -> None:
     """Contract: the html output can be fed to ``{@html}`` — nothing
     other than ``<mark>`` / ``</mark>`` appears as a raw tag."""

@@ -17,41 +17,79 @@ import html
 import re
 from typing import Iterable
 
-from eoditdeora.retriever.query_parser import expand_search_terms
-from eoditdeora.storage.tokenize import kiwi_tokenize_for_query
+from eoditdeora.retriever.query_parser import parse_query
 
 SNIPPET_WINDOW = 240
 BEFORE_MATCH = 60
 
 
+def _raw_positive_terms(query: str) -> list[str]:
+    terms: list[str] = []
+    i = 0
+    n = len(query)
+
+    while i < n:
+        while i < n and query[i].isspace():
+            i += 1
+        if i >= n:
+            break
+
+        is_negative = False
+        if query[i] == "-":
+            j = i + 1
+            while j < n and query[j].isspace():
+                j += 1
+            if j < n:
+                is_negative = True
+                i = j
+
+        if i < n and query[i] == '"':
+            i += 1
+            start = i
+            while i < n and query[i] != '"':
+                i += 1
+            phrase = query[start:i].strip()
+            if phrase and not is_negative:
+                terms.append(phrase)
+            if i < n and query[i] == '"':
+                i += 1
+            continue
+
+        start = i
+        while i < n and not query[i].isspace():
+            i += 1
+        token = query[start:i].strip()
+        if token and not is_negative:
+            terms.append(token)
+
+    return terms
+
+
 def _query_terms(query: str) -> list[str]:
     """Tokens we'll try to highlight.
 
-    We keep both raw whitespace-split tokens (so English phrases and
-    code identifiers match literally) and Kiwi morphs (so Korean
-    inflected forms hit their stem). Duplicates are dropped, empties
-    skipped, and we lowercase for the comparison side.
+    This mirrors the actual search parser rather than re-tokenizing the
+    raw string ad hoc. That keeps snippet centering / highlighting in
+    sync with user-visible search semantics:
+
+      * negative terms do not get highlighted
+      * quoted phrases stay intact
+      * conservative synonym expansion matches the retriever
     """
+    parsed = parse_query(query)
+    candidates = [*_raw_positive_terms(query), *parsed.phrases, *parsed.positive_terms]
     seen: set[str] = set()
     terms: list[str] = []
-    for raw in re.split(r"\s+", query.strip()):
-        if not raw:
+    for raw in candidates:
+        term = raw.strip()
+        if not term:
             continue
-        if raw.lower() not in seen:
-            seen.add(raw.lower())
-            terms.append(raw)
-    try:
-        for morph in kiwi_tokenize_for_query(query):
-            if not morph:
-                continue
-            if morph.lower() not in seen:
-                seen.add(morph.lower())
-                terms.append(morph)
-    except Exception:  # noqa: BLE001
-        # Kiwi is optional at runtime (tests may stub it); fall back to
-        # raw terms alone.
-        pass
-    return expand_search_terms(terms)
+        lowered = term.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        terms.append(term)
+    return terms
 
 
 def _first_match(text: str, terms: Iterable[str]) -> int:
