@@ -89,3 +89,17 @@ def test_query_expansion_matches_common_office_synonyms(tmp_path: Path):
     budget_results = store.search("예산안", top_k=5)
 
     assert [r["chunk_id"] for r in budget_results] == ["c1"]
+
+
+def test_query_expansion_matches_korean_office_doc_synonyms(tmp_path: Path):
+    store = FtsStore(index_dir=tmp_path / "tantivy")
+    store.upsert(
+        [
+            {"chunk_id": "c1", "doc_id": "d1", "text": "기안서 최종본 공유"},
+            {"chunk_id": "c2", "doc_id": "d2", "text": "연차 사용 계획 정리"},
+            {"chunk_id": "c3", "doc_id": "d3", "text": "주간 보고 공유"},
+        ]
+    )
+
+    assert [r["chunk_id"] for r in store.search("품의서", top_k=5)] == ["c1"]
+    assert [r["chunk_id"] for r in store.search("휴가", top_k=5)] == ["c2"]

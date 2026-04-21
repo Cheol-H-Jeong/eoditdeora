@@ -37,6 +37,11 @@ def test_parse_query_expands_office_synonyms_for_positive_terms() -> None:
     assert parsed.positive_terms == ["예산안", "예산"]
 
 
+def test_parse_query_expands_korean_office_doc_synonyms() -> None:
+    parsed = parse_query("품의서 휴가")
+    assert parsed.positive_terms == ["품", "서", "기안", "휴가", "연차"]
+
+
 def test_query_tokenizer_drops_stopwords_only_for_query():
     assert kiwi_tokenize_for_query("예산을 의 품의") == ["예산", "품"]
 
