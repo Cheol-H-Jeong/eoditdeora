@@ -23,11 +23,13 @@ class _MockStreamResponse:
         *,
         json_data: object | None = None,
         text: str = "",
+        headers: dict[str, str] | None = None,
     ) -> None:
         self._lines = lines
         self.status_code = status_code
         self._json_data = json_data
         self.text = text
+        self.headers = headers or {}
 
     def __enter__(self) -> _MockStreamResponse:
         return self
@@ -159,6 +161,7 @@ def test_chat_stream_surfaces_rate_limit(monkeypatch: pytest.MonkeyPatch):
             [],
             status_code=429,
             json_data={"error": {"message": "too many requests"}},
+            headers={"retry-after": "0.75"},
         )
 
     monkeypatch.setattr(httpx, "stream", fake_stream)
@@ -169,6 +172,7 @@ def test_chat_stream_surfaces_rate_limit(monkeypatch: pytest.MonkeyPatch):
     assert ei.value.code == ERR_UPSTREAM_RATE_LIMIT
     assert ei.value.data is not None
     assert ei.value.data.get("detail") == "too many requests"
+    assert ei.value.data.get("retry_after_sec") == 0.75
 
 
 def test_chat_stream_surfaces_bad_request(monkeypatch: pytest.MonkeyPatch):

@@ -11,6 +11,7 @@ export type RpcInvokeError = {
     detail?: string;
     reason?: string;
     path?: string;
+    retry_after_sec?: number;
   } | null;
 };
 
@@ -44,6 +45,13 @@ function formatEndpointUrl(url: unknown): string {
 function detailSuffix(detail: unknown): string {
   if (typeof detail !== "string" || !detail.trim()) return "";
   return ` 상세: ${detail.trim()}`;
+}
+
+function retryAfterLabel(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return "";
+  const rounded = value >= 10 ? Math.ceil(value) : Math.ceil(value * 10) / 10;
+  const display = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+  return `${display}초 후 다시 시도하세요.`;
 }
 
 function basename(path: unknown): string {
@@ -140,7 +148,9 @@ export function formatRpcError(error: unknown): string {
       return `${role} 서버 응답 형식이 올바르지 않습니다${endpointHint}. OpenAI 호환 API인지, 프록시가 HTML 로그인 페이지를 돌려주고 있지 않은지 확인하세요.${detailSuffix(error.data?.detail)}`;
     }
     if (code === -32014) {
-      return `${role} 서버 요청 한도에 걸렸습니다. 잠시 후 다시 시도하거나 동시 요청 수를 줄이세요.`;
+      const retryHint = retryAfterLabel(error.data?.retry_after_sec);
+      const suffix = retryHint || "잠시 후 다시 시도하거나 동시 요청 수를 줄이세요.";
+      return `${role} 서버 요청 한도에 걸렸습니다. ${suffix}`;
     }
     if (code === -32016) {
       return formatBadRequestMessage(error);

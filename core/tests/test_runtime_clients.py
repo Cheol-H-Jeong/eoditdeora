@@ -305,6 +305,8 @@ def test_llm_429_raises_rate_limit_after_retries(monkeypatch: pytest.MonkeyPatch
         client.chat("s", "u")
     assert ei.value.code == ERR_UPSTREAM_RATE_LIMIT
     assert attempts["count"] == 3
+    assert ei.value.data is not None
+    assert ei.value.data.get("retry_after_sec") == 0.2
 
 
 def test_llm_429_honors_retry_after_header(monkeypatch: pytest.MonkeyPatch):
@@ -327,6 +329,8 @@ def test_llm_429_honors_retry_after_header(monkeypatch: pytest.MonkeyPatch):
     assert ei.value.code == ERR_UPSTREAM_RATE_LIMIT
     assert attempts["count"] == 3
     assert slept == [0.75, 0.75]
+    assert ei.value.data is not None
+    assert ei.value.data.get("retry_after_sec") == 0.75
 
 
 def test_llm_503_invalid_retry_after_falls_back_to_exponential_delay(

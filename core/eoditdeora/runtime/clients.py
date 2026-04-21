@@ -311,6 +311,9 @@ def _raise_upstream_for_status(r: httpx.Response, url: str, role: str) -> None:
             data,
         )
     if r.status_code == 429:
+        retry_after_sec = _retry_delay_for_response(r, _INITIAL_RETRY_DELAY_SEC)
+        if retry_after_sec > 0:
+            data["retry_after_sec"] = retry_after_sec
         raise RpcError(
             ERR_UPSTREAM_RATE_LIMIT,
             "요청이 너무 많아 잠시 제한되었습니다",
