@@ -31,6 +31,12 @@ def test_enable_writes_desktop_file(_linux_home, monkeypatch):
     assert "Exec=/opt/eoditdeora.AppImage --autostart" in content
 
 
+def test_enable_quotes_linux_exec_path_with_spaces(_linux_home):
+    autostart_mod.enable(exec_cmd="/opt/My Apps/eoditdeora.AppImage")
+    content = _linux_home.read_text(encoding="utf-8")
+    assert 'Exec="/opt/My Apps/eoditdeora.AppImage" --autostart' in content
+
+
 def test_enable_is_idempotent(_linux_home):
     autostart_mod.enable(exec_cmd="/opt/x")
     autostart_mod.enable(exec_cmd="/opt/x")
@@ -68,3 +74,8 @@ def test_current_launcher_falls_back_to_dev_script(monkeypatch):
     monkeypatch.setattr(sys, "frozen", False, raising=False)
     cmd = autostart_mod._current_launcher()
     assert "run-desktop.py" in cmd
+
+
+def test_linux_exec_command_preserves_prequoted_dev_command():
+    cmd = '"/usr/bin/python3" "/tmp/my repo/scripts/run-desktop.py"'
+    assert autostart_mod._linux_exec_command(cmd) == cmd

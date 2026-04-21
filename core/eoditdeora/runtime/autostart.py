@@ -102,7 +102,7 @@ def _enable_linux(cmd: str) -> dict[str, str]:
         f"Type=Application\n"
         f"Name={_APP_NAME}\n"
         "Comment=어딨더라 — local document knowledge base\n"
-        f"Exec={cmd} --autostart\n"
+        f"Exec={_linux_exec_command(cmd)} --autostart\n"
         "Terminal=false\n"
         "Categories=Office;Utility;\n"
         "X-GNOME-Autostart-enabled=true\n"
@@ -136,6 +136,20 @@ def _status_linux() -> dict[str, object]:
         "enabled": target.exists(),
         "path": str(target),
     }
+
+
+def _linux_exec_command(cmd: str) -> str:
+    """Quote bare paths with spaces for XDG desktop Exec lines.
+
+    The desktop entry parser tokenizes on spaces, so a bare AppImage
+    path like `/home/user/My Apps/eoditdeora.AppImage` must be wrapped.
+    Commands that already contain explicit quoting (dev mode launcher)
+    are preserved as-is.
+    """
+    if any(ch.isspace() for ch in cmd) and '"' not in cmd:
+        escaped = cmd.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    return cmd
 
 
 # ---------------------------------------------------------------------------
