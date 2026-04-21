@@ -11,6 +11,9 @@ venv/
 dist/
 build/
 *.spec
+# keep our hand-written PyInstaller specs (auto-generated ones still ignored)
+!installers/linux/eoditdeora.spec
+!installers/windows/eoditdeora.spec
 
 # Node / Tauri
 node_modules/
