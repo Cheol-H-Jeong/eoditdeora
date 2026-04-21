@@ -87,6 +87,20 @@ def test_rtf_parser_decodes_cp949_hex_escapes(tmp_path: Path):
     assert [b.text for b in res.doc.blocks] == ["한글 예산안"]
 
 
+def test_rtf_parser_skips_hex_fallback_after_unicode_escape(tmp_path: Path):
+    f = tmp_path / "unicode-fallback.rtf"
+    f.write_text(
+        "{\\rtf1\\ansi\\ansicpg949\\uc2 "
+        "\\pard "
+        "\\u54620\\'c7\\'d1"
+        "\\u44544\\'b1\\'db\\par}",
+        encoding="latin-1",
+    )
+    res = RtfParser().parse(f, doc_id="sha256:" + "9" * 64)
+    assert res.doc.parse_status == "ok"
+    assert [b.text for b in res.doc.blocks] == ["한글"]
+
+
 def test_odt_parser_extracts_headings_paragraphs_and_metadata(tmp_path: Path):
     f = tmp_path / "memo.odt"
     _write_odf_zip(

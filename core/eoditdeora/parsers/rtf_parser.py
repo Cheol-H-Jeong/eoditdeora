@@ -226,12 +226,7 @@ def _extract_rtf_text(raw: bytes) -> str | None:
                     out.append(_UNICODE_CHAR_REPLACEMENT)
             if i < len(text) and text[i] == " ":
                 i += 1
-            skipped = 0
-            while skipped < unicode_skip and i < len(text):
-                if text[i] in "\\{}":
-                    break
-                i += 1
-                skipped += 1
+            i = _skip_unicode_fallback(text, i, unicode_skip)
             continue
         elif word == "par":
             _flush_ansi_bytes()
@@ -278,6 +273,36 @@ def _resolve_ansicpg(codepage: int) -> str | None:
         return codecs.lookup(f"cp{codepage}").name
     except LookupError:
         return None
+
+
+def _skip_unicode_fallback(text: str, start: int, limit: int) -> int:
+    if limit <= 0:
+        return start
+
+    i = start
+    skipped = 0
+    while skipped < limit and i < len(text):
+        ch = text[i]
+        if ch in "{}":
+            break
+        if ch != "\\":
+            i += 1
+            skipped += 1
+            continue
+
+        if i + 1 >= len(text):
+            break
+        token = text[i + 1]
+        if token == "'" and i + 3 < len(text):
+            i += 4
+            skipped += 1
+            continue
+        if token in "\\{}":
+            i += 2
+            skipped += 1
+            continue
+        break
+    return i
 
 
 def _normalize_text(text: str) -> str:
