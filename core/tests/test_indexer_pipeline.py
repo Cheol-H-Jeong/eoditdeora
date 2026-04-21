@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from eoditdeora.collector.model import ChangeKind, CollectedFile
+from eoditdeora.indexer import pipeline
 from eoditdeora.indexer.pipeline import index_file
 from eoditdeora.storage.fts import FtsStore
 from eoditdeora.storage.meta import MetaStore
@@ -105,6 +106,39 @@ def test_content_change_to_empty_replaces_document_without_crashing(tmp_path: Pa
     assert current is not None
     assert current["size_bytes"] == 0
     assert not fts.search("empty_marker_123", top_k=5)
+
+
+def test_reparse_failure_clears_stale_search_rows_for_same_doc_id(
+    tmp_path: Path,
+    stores,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    meta, fts, vec = stores
+    src = tmp_path / "note.txt"
+    marker = "stale_marker_same_doc_id_123"
+    src.write_text(f"정상 본문 {marker}", encoding="utf-8")
+    index_file(_make_cf(src), meta=meta, fts=fts, vectors=vec)
+    assert fts.search(marker, top_k=5)
+
+    original_parse_file = pipeline.parse_file
+
+    def _boom(path: Path, *, doc_id: str):
+        raise RuntimeError("synthetic parse failure")
+
+    monkeypatch.setattr(pipeline, "parse_file", _boom)
+    try:
+        time.sleep(0.01)
+        src.touch()
+        result = index_file(_make_cf(src), meta=meta, fts=fts, vectors=vec)
+    finally:
+        monkeypatch.setattr(pipeline, "parse_file", original_parse_file)
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "parser_error"
+    assert not fts.search(marker, top_k=5)
+    current = meta.get_document_by_path(str(src.resolve()))
+    assert current is not None
+    assert meta.get_chunks_for_doc(current["doc_id"]) == []
 
 
 def test_deleted_file_purges_from_all_stores(tmp_path: Path, stores):

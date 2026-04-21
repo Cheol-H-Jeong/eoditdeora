@@ -103,6 +103,18 @@ def _delete_existing_doc(
     vectors.delete_doc(doc_id)
 
 
+def _clear_indexed_payload(
+    *,
+    doc_id: str,
+    meta: MetaStore,
+    fts: FtsStore,
+    vectors: VectorStore,
+) -> None:
+    meta.replace_chunks(doc_id, [])
+    fts.delete_doc(doc_id)
+    vectors.delete_doc(doc_id)
+
+
 def _parse_with_timeout(path: Path, *, doc_id: str, timeout_sec: int):
     done = threading.Event()
     result_queue: "queue.Queue[tuple[str, object]]" = queue.Queue(maxsize=1)
@@ -260,6 +272,12 @@ def index_file(
     _upsert_parsed_doc(cf=cf, meta=meta, doc=doc, path=path, indexed_at=now_ns)
 
     if doc.parse_status != "ok":
+        _clear_indexed_payload(
+            doc_id=doc.doc_id,
+            meta=meta,
+            fts=fts,
+            vectors=vectors,
+        )
         log.warning(
             "parser_failed",
             path=str(path),
