@@ -17,6 +17,7 @@ import html
 import re
 from typing import Iterable
 
+from eoditdeora.retriever.query_parser import expand_search_terms
 from eoditdeora.storage.tokenize import kiwi_tokenize_for_query
 
 SNIPPET_WINDOW = 240
@@ -50,7 +51,7 @@ def _query_terms(query: str) -> list[str]:
         # Kiwi is optional at runtime (tests may stub it); fall back to
         # raw terms alone.
         pass
-    return terms
+    return expand_search_terms(terms)
 
 
 def _first_match(text: str, terms: Iterable[str]) -> int:

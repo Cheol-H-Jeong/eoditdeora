@@ -75,3 +75,17 @@ def test_negative_phrase_with_whitespace_still_excludes_exact_phrase(tmp_path: P
     results = store.search('예산 - "품의서 초안"', top_k=5)
 
     assert {r["chunk_id"] for r in results} == {"c2", "c3"}
+
+
+def test_query_expansion_matches_common_office_synonyms(tmp_path: Path):
+    store = FtsStore(index_dir=tmp_path / "tantivy")
+    store.upsert(
+        [
+            {"chunk_id": "c1", "doc_id": "d1", "text": "예산 검토 완료"},
+            {"chunk_id": "c2", "doc_id": "d2", "text": "회의록 공유"},
+        ]
+    )
+
+    budget_results = store.search("예산안", top_k=5)
+
+    assert [r["chunk_id"] for r in budget_results] == ["c1"]

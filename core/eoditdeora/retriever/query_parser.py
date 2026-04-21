@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from eoditdeora.storage.tokenize import kiwi_tokenize_for_query
 
 _TANTIVY_SPECIALS = set(r'+-&|!(){}[]^"~*?:\/')
+_SYNONYM_MAP = {
+    "예산": ("예산안",),
+    "예산안": ("예산",),
+}
 
 
 @dataclass(slots=True)
@@ -13,6 +17,36 @@ class ParsedQuery:
     phrases: list[str]
     negative_terms: list[str]
     negative_phrases: list[str]
+
+
+def expand_search_terms(terms: list[str]) -> list[str]:
+    """Add conservative office-document synonyms while preserving order."""
+    expanded: list[str] = []
+    seen: set[str] = set()
+    for term in terms:
+        norm = term.strip()
+        if not norm:
+            continue
+        if norm not in seen:
+            seen.add(norm)
+            expanded.append(norm)
+        for synonym in _SYNONYM_MAP.get(norm, ()):
+            if synonym not in seen:
+                seen.add(synonym)
+                expanded.append(synonym)
+    return expanded
+
+
+def _tokenize_terms(raw_terms: list[str], *, expand: bool) -> list[str]:
+    seen: set[str] = set()
+    tokenized: list[str] = []
+    inputs = expand_search_terms(raw_terms) if expand else raw_terms
+    for raw in inputs:
+        for term in kiwi_tokenize_for_query(raw):
+            if term not in seen:
+                seen.add(term)
+                tokenized.append(term)
+    return tokenized
 
 
 def parse_query(raw: str) -> ParsedQuery:
@@ -64,13 +98,8 @@ def parse_query(raw: str) -> ParsedQuery:
         else:
             positive_raw.append(token)
 
-    positive_terms: list[str] = []
-    for token in positive_raw:
-        positive_terms.extend(kiwi_tokenize_for_query(token))
-
-    negative_terms: list[str] = []
-    for token in negative_raw:
-        negative_terms.extend(kiwi_tokenize_for_query(token))
+    positive_terms = _tokenize_terms(positive_raw, expand=True)
+    negative_terms = _tokenize_terms(negative_raw, expand=False)
 
     return ParsedQuery(
         positive_terms=positive_terms,

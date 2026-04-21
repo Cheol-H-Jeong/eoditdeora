@@ -67,6 +67,12 @@ def test_case_insensitive_english() -> None:
     assert "<mark>README</mark>" in html_out
 
 
+def test_synonym_expansion_marks_matching_office_term() -> None:
+    plain, html_out = make_snippet("예산 검토 완료", "예산안")
+    assert "예산" in plain
+    assert "<mark>예산</mark>" in html_out
+
+
 def test_mark_tags_can_be_consumed_as_html_safely() -> None:
     """Contract: the html output can be fed to ``{@html}`` — nothing
     other than ``<mark>`` / ``</mark>`` appears as a raw tag."""
