@@ -37,7 +37,7 @@ Remove-Item -Recurse -Force "$Here\dist"  -ErrorAction SilentlyContinue
     --clean --noconfirm `
     --distpath "$Here\dist" `
     --workpath "$Here\build" `
-    "$Root\installers\linux\eoditdeora.spec"
+    "$Here\eoditdeora.spec"
 if ($LASTEXITCODE -ne 0) { Die "PyInstaller failed" }
 
 Say "Running Inno Setup compiler"

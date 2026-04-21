@@ -12,6 +12,9 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   # -------------------------------------------------------------------
   # Fast sanity — tests on Linux.
@@ -25,16 +28,26 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+
+      - name: Install system build deps (for lxml / pyhwp)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libxml2-dev libxslt1-dev zlib1g-dev
+
       - name: Install test deps
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-          pip install kiwipiepy tantivy lancedb pyarrow httpx xxhash \
-                      watchdog pathspec structlog tomli-w platformdirs \
-                      pydantic lxml pypdfium2 pdfplumber python-docx \
-                      openpyxl python-pptx olefile xlrd extract-msg \
-                      py7zr rarfile Pillow pyhwp click rich
+          python -m pip install --upgrade pip wheel setuptools
+          pip install \
+            pytest pytest-asyncio \
+            pydantic platformdirs tomli-w pathspec structlog xxhash watchdog \
+            httpx click rich \
+            lxml pypdfium2 pdfplumber python-docx openpyxl python-pptx \
+            olefile xlrd extract-msg py7zr rarfile Pillow pyhwp \
+            kiwipiepy lancedb pyarrow tantivy
+
       - name: Run pytest
+        env:
+          PYTHONPATH: core
         run: pytest core/tests -q
 
   # -------------------------------------------------------------------
@@ -52,13 +65,19 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      - name: System deps
+      - name: System deps (build + Qt WebEngine runtime + AppImage tools)
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            build-essential libxml2-dev libxslt1-dev zlib1g-dev \
             binutils patchelf file desktop-file-utils libfuse2 \
-            libxkbcommon-x11-0 libegl1 libxcb-cursor0 \
-            libnss3 libxcomposite1 libxdamage1 libxrandr2 libxi6 libasound2
+            libxkbcommon-x11-0 libegl1 libgl1 libxcb-cursor0 libxcb-icccm4 \
+            libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-shape0 libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 \
+            libxcb-xkb1 libxkbcommon0 libxkbcommon-x11-0 \
+            libnss3 libxcomposite1 libxdamage1 libxrandr2 libxi6 \
+            libasound2 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+            libgtk-3-0 libpango-1.0-0 libdrm2 libgbm1
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -74,7 +93,7 @@ jobs:
       - name: Create venv + install deps
         run: |
           python -m venv .venv
-          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install --upgrade pip wheel setuptools
           .venv/bin/pip install \
             pyinstaller pywebview PyQt6 PyQt6-WebEngine \
             pydantic platformdirs tomli-w pathspec structlog xxhash watchdog \
@@ -92,6 +111,7 @@ jobs:
         with:
           name: eoditdeora-linux-appimage
           path: installers/linux/out/Eoditdeora-*-x86_64.AppImage
+          if-no-files-found: error
 
   # -------------------------------------------------------------------
   # Windows installer: PyInstaller → Inno Setup.
@@ -123,7 +143,7 @@ jobs:
         shell: pwsh
         run: |
           python -m venv .venv
-          .\.venv\Scripts\pip install --upgrade pip
+          .\.venv\Scripts\pip install --upgrade pip wheel setuptools
           .\.venv\Scripts\pip install `
             pyinstaller pywebview PyQt6 PyQt6-WebEngine `
             pydantic platformdirs tomli-w pathspec structlog xxhash watchdog `
@@ -133,14 +153,29 @@ jobs:
 
       - name: Install Inno Setup
         shell: pwsh
-        run: choco install innosetup --no-progress -y
+        run: |
+          choco install innosetup --no-progress -y
+          # ISCC ships at a fixed path; expose it on PATH for this job.
+          Add-Content $env:GITHUB_PATH "C:\Program Files (x86)\Inno Setup 6"
 
-      - name: Stage icon placeholder
+      - name: Generate Windows icon (ImageMagick → fallback Pillow)
         shell: pwsh
         run: |
-          Copy-Item installers/linux/icon.svg installers/windows/icon.svg
-          # Convert SVG → ICO via ImageMagick (pre-installed on windows-latest)
-          magick -background none installers/windows/icon.svg -resize 256x256 installers/windows/icon.ico
+          Copy-Item installers/linux/icon.svg installers/windows/icon.svg -Force
+          $magick = (Get-Command magick -ErrorAction SilentlyContinue)
+          if ($magick) {
+            & $magick.Path -background none installers/windows/icon.svg -resize 256x256 installers/windows/icon.ico
+          } else {
+            # Fallback: synthesize a simple 256x256 PNG via Pillow then save as ICO.
+            .\.venv\Scripts\python -c @"
+from PIL import Image, ImageDraw
+img = Image.new('RGBA', (256, 256), (11, 13, 17, 255))
+d = ImageDraw.Draw(img)
+d.ellipse((60, 70, 180, 190), outline=(138, 180, 255, 255), width=14)
+d.line((165, 170, 220, 225), fill=(138, 180, 255, 255), width=14)
+img.save('installers/windows/icon.ico', sizes=[(256, 256)])
+"@
+          }
 
       - name: Build installer
         shell: pwsh
@@ -153,3 +188,4 @@ jobs:
         with:
           name: eoditdeora-windows-installer
           path: installers/windows/out/Eoditdeora-*-setup.exe
+          if-no-files-found: error
