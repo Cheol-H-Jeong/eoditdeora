@@ -13,6 +13,7 @@ a role is not configured, so callers short-circuit gracefully.
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import httpx
@@ -35,9 +36,17 @@ from eoditdeora.utils.logging import get_logger
 
 log = get_logger(__name__)
 
+_MAX_UPSTREAM_ATTEMPTS = 3
+_INITIAL_RETRY_DELAY_SEC = 0.2
+_MAX_RETRY_DELAY_SEC = 1.0
+
 
 def _auth_headers(api_key: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {api_key}"} if api_key else {}
+
+
+def _is_retryable_status(status_code: int) -> bool:
+    return status_code == 429 or status_code >= 500
 
 
 def _raise_upstream_for_status(r: httpx.Response, url: str, role: str) -> None:
@@ -78,23 +87,58 @@ def _post_json(
     body: dict[str, Any],
     role: str,
 ) -> dict[str, Any]:
-    try:
-        r = client.post(url, json=body)
-    except httpx.HTTPError as e:
-        raise RpcError(
-            ERR_UPSTREAM_UNAVAILABLE,
-            "추론 서버에 연결할 수 없습니다",
-            {"url": url, "role": role, "detail": str(e)},
-        ) from e
-    _raise_upstream_for_status(r, url, role)
-    try:
-        return r.json()  # type: ignore[no-any-return]
-    except ValueError as e:
-        raise RpcError(
-            ERR_UPSTREAM_BAD_RESPONSE,
-            "추론 서버가 JSON이 아닌 응답을 돌려주었습니다",
-            {"url": url, "role": role},
-        ) from e
+    delay = _INITIAL_RETRY_DELAY_SEC
+    for attempt in range(1, _MAX_UPSTREAM_ATTEMPTS + 1):
+        try:
+            r = client.post(url, json=body)
+        except httpx.HTTPError as e:
+            if attempt < _MAX_UPSTREAM_ATTEMPTS:
+                log.warning(
+                    "upstream_request_retry",
+                    role=role,
+                    url=url,
+                    reason="transport_error",
+                    detail=str(e),
+                    attempt=attempt,
+                    max_attempts=_MAX_UPSTREAM_ATTEMPTS,
+                    delay_sec=delay,
+                )
+                time.sleep(delay)
+                delay = min(delay * 2, _MAX_RETRY_DELAY_SEC)
+                continue
+            raise RpcError(
+                ERR_UPSTREAM_UNAVAILABLE,
+                "추론 서버에 연결할 수 없습니다",
+                {"url": url, "role": role, "detail": str(e)},
+            ) from e
+
+        if r.status_code >= 400:
+            if attempt < _MAX_UPSTREAM_ATTEMPTS and _is_retryable_status(r.status_code):
+                log.warning(
+                    "upstream_request_retry",
+                    role=role,
+                    url=url,
+                    reason="http_status",
+                    status=r.status_code,
+                    attempt=attempt,
+                    max_attempts=_MAX_UPSTREAM_ATTEMPTS,
+                    delay_sec=delay,
+                )
+                time.sleep(delay)
+                delay = min(delay * 2, _MAX_RETRY_DELAY_SEC)
+                continue
+            _raise_upstream_for_status(r, url, role)
+
+        try:
+            return r.json()  # type: ignore[no-any-return]
+        except ValueError as e:
+            raise RpcError(
+                ERR_UPSTREAM_BAD_RESPONSE,
+                "추론 서버가 JSON이 아닌 응답을 돌려주었습니다",
+                {"url": url, "role": role},
+            ) from e
+
+    raise AssertionError("unreachable")
 
 
 def _coerce_endpoint(

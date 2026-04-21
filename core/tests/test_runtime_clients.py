@@ -128,6 +128,25 @@ def test_llm_http_5xx_raises_upstream_unavailable():
     assert ei.value.code == ERR_UPSTREAM_UNAVAILABLE
 
 
+def test_llm_retries_transient_http_5xx_then_succeeds(monkeypatch: pytest.MonkeyPatch):
+    attempts = {"count": 0}
+    monkeypatch.setattr("eoditdeora.runtime.clients.time.sleep", lambda _sec: None)
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            return httpx.Response(502, text="bad gateway")
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"role": "assistant", "content": "복구됨"}}]},
+        )
+
+    client = LlmClient("127.0.0.1", 0)
+    client._client = _mock_client(handler)  # type: ignore[attr-defined]
+    assert client.chat("s", "u") == "복구됨"
+    assert attempts["count"] == 3
+
+
 def test_llm_401_raises_upstream_auth():
     def handler(_req: httpx.Request) -> httpx.Response:
         return httpx.Response(401, json={"error": "Invalid API Key"})
@@ -176,6 +195,22 @@ def test_llm_connect_error_raises_upstream_unavailable():
     assert ei.value.code == ERR_UPSTREAM_UNAVAILABLE
 
 
+def test_embed_retries_transport_error_then_succeeds(monkeypatch: pytest.MonkeyPatch):
+    attempts = {"count": 0}
+    monkeypatch.setattr("eoditdeora.runtime.clients.time.sleep", lambda _sec: None)
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise httpx.ConnectError("connection refused")
+        return httpx.Response(200, json={"data": [{"embedding": [0.1, 0.2]}]})
+
+    client = EmbedClient("127.0.0.1", 0)
+    client._client = _mock_client(handler)  # type: ignore[attr-defined]
+    assert client.embed(["x"]) == [[0.1, 0.2]]
+    assert attempts["count"] == 2
+
+
 def test_llm_non_json_body_raises_bad_response():
     def handler(_req: httpx.Request) -> httpx.Response:
         return httpx.Response(200, text="<html>login</html>")
@@ -200,6 +235,21 @@ def test_llm_400_generic_4xx_raises_unavailable():
     with pytest.raises(RpcError) as ei:
         client.chat("s", "u")
     assert ei.value.code == ERR_UPSTREAM_UNAVAILABLE
+
+
+def test_llm_does_not_retry_non_retryable_404():
+    attempts = {"count": 0}
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        return httpx.Response(404, text="no such route")
+
+    client = LlmClient("127.0.0.1", 0)
+    client._client = _mock_client(handler)  # type: ignore[attr-defined]
+    with pytest.raises(RpcError) as ei:
+        client.chat("s", "u")
+    assert ei.value.code == ERR_UPSTREAM_NOT_FOUND
+    assert attempts["count"] == 1
 
 
 def test_llm_content_wins_over_reasoning_content():
