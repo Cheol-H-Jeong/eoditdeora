@@ -8,6 +8,17 @@ def test_parse_query_splits_positive_phrase_and_negative():
         positive_terms=["예산"],
         phrases=["품의서 초안"],
         negative_terms=["취소"],
+        negative_phrases=[],
+    )
+
+
+def test_parse_query_preserves_negative_phrase_as_phrase() -> None:
+    parsed = parse_query('예산 -"품의서 초안"')
+    assert parsed == ParsedQuery(
+        positive_terms=["예산"],
+        phrases=[],
+        negative_terms=[],
+        negative_phrases=["품의서 초안"],
     )
 
 
@@ -20,5 +31,16 @@ def test_build_tantivy_query_mixes_terms_phrases_and_negatives():
         positive_terms=["예산"],
         phrases=["품의서 초안"],
         negative_terms=["취소"],
+        negative_phrases=[],
     )
     assert build_tantivy_query(parsed) == 'tokens:예산 phrase_text:"품의서 초안" -tokens:취소'
+
+
+def test_build_tantivy_query_includes_negative_phrases() -> None:
+    parsed = ParsedQuery(
+        positive_terms=["예산"],
+        phrases=[],
+        negative_terms=[],
+        negative_phrases=["품의서 초안"],
+    )
+    assert build_tantivy_query(parsed) == 'tokens:예산 -phrase_text:"품의서 초안"'

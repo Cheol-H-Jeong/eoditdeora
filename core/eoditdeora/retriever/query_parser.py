@@ -12,12 +12,14 @@ class ParsedQuery:
     positive_terms: list[str]
     phrases: list[str]
     negative_terms: list[str]
+    negative_phrases: list[str]
 
 
 def parse_query(raw: str) -> ParsedQuery:
     positive_raw: list[str] = []
     negative_raw: list[str] = []
     phrases: list[str] = []
+    negative_phrases: list[str] = []
     i = 0
     n = len(raw)
 
@@ -39,7 +41,7 @@ def parse_query(raw: str) -> ParsedQuery:
             phrase = raw[start:i].strip()
             if phrase:
                 if is_negative:
-                    negative_raw.append(phrase)
+                    negative_phrases.append(phrase)
                 else:
                     phrases.append(phrase)
             if i < n and raw[i] == '"':
@@ -69,6 +71,7 @@ def parse_query(raw: str) -> ParsedQuery:
         positive_terms=positive_terms,
         phrases=phrases,
         negative_terms=negative_terms,
+        negative_phrases=negative_phrases,
     )
 
 
@@ -77,6 +80,7 @@ def build_tantivy_query(parsed: ParsedQuery) -> str:
     parts.extend(f'tokens:{_escape_term(term)}' for term in parsed.positive_terms)
     parts.extend(f'phrase_text:"{_escape_phrase(phrase)}"' for phrase in parsed.phrases)
     parts.extend(f'-tokens:{_escape_term(term)}' for term in parsed.negative_terms)
+    parts.extend(f'-phrase_text:"{_escape_phrase(phrase)}"' for phrase in parsed.negative_phrases)
     return " ".join(parts)
 
 
