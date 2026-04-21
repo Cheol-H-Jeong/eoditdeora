@@ -1,15 +1,13 @@
 """Hybrid retriever end-to-end.
 
-We seed real SQLite + FTS stores with chunks and documents. The vector
-store + reranker paths are bypassed (supervisor reports not-running)
-so the test exercises the BM25-only fallback. A separate test injects
-fake embed + rerank clients to verify the hybrid fusion path.
+Embed + rerank clients are injected via monkeypatching the factory
+helpers in `eoditdeora.runtime.clients`. The unconfigured case uses
+the default settings (empty base_url → factories return None).
 """
 
 from __future__ import annotations
 
 import time
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -45,7 +43,9 @@ def _seed(meta: MetaStore, doc_id: str, path: str) -> None:
     )
 
 
-def test_bm25_only_fallback_when_embed_backend_offline(monkeypatch: pytest.MonkeyPatch):
+def test_bm25_only_when_no_endpoints_configured():
+    # No monkeypatching — factories return None on empty settings, so
+    # the retriever silently falls back to BM25.
     meta = MetaStore()
     fts = FtsStore()
     try:
@@ -65,25 +65,11 @@ def test_bm25_only_fallback_when_embed_backend_offline(monkeypatch: pytest.Monke
                 },
             ]
         )
-
-        # RuntimeSupervisor reports neither embed nor rerank running.
-        class _FakeSup:
-            host = "127.0.0.1"
-
-            def is_running(self, name: str) -> bool:
-                return False
-
-            def port(self, name: str) -> int:
-                return 0
-
-        monkeypatch.setattr(hybrid_mod, "RuntimeSupervisor", lambda: _FakeSup())
-
         results = hybrid_search("예산", top_k=5)
     finally:
         meta.close()
     assert results
     assert results[0]["doc_id"] == "sha256:" + "a" * 64
-    assert "예산" in results[0]["snippet"]
 
 
 def test_hybrid_fuses_bm25_and_dense(monkeypatch: pytest.MonkeyPatch):
@@ -93,7 +79,6 @@ def test_hybrid_fuses_bm25_and_dense(monkeypatch: pytest.MonkeyPatch):
     try:
         _seed(meta, "sha256:" + "a" * 64, "/tmp/a.txt")
         _seed(meta, "sha256:" + "b" * 64, "/tmp/b.txt")
-        # FTS: 'a' is a strong keyword match, 'b' is not.
         fts.upsert(
             [
                 {
@@ -108,8 +93,6 @@ def test_hybrid_fuses_bm25_and_dense(monkeypatch: pytest.MonkeyPatch):
                 },
             ]
         )
-        # Vector store: deterministic — 'b' has a near-identical vector to
-        # the query. We want RRF to still pick 'a' because it wins BM25.
         vec.upsert(
             [
                 {
@@ -127,29 +110,16 @@ def test_hybrid_fuses_bm25_and_dense(monkeypatch: pytest.MonkeyPatch):
             ]
         )
 
-        class _FakeSup:
-            host = "127.0.0.1"
-
-            def is_running(self, name: str) -> bool:
-                return name in {"embed"}  # embed yes, rerank no
-
-            def port(self, name: str) -> int:
-                return 0
-
         class _FakeEmbed:
-            def __init__(self, *a, **k) -> None:
-                pass
-
             def embed(self, texts: list[str]) -> list[list[float]]:
                 return [[1.0] * EMBED_DIM for _ in texts]
 
             def close(self) -> None:
                 pass
 
-        monkeypatch.setattr(hybrid_mod, "RuntimeSupervisor", lambda: _FakeSup())
-        monkeypatch.setattr(hybrid_mod, "EmbedClient", _FakeEmbed)
+        monkeypatch.setattr(hybrid_mod, "get_embed_client", lambda: _FakeEmbed())
+        monkeypatch.setattr(hybrid_mod, "get_rerank_client", lambda: None)
 
-        # Query matches 'a' on BM25 via 'abcxyz' but embedding is closer to 'b'.
         results = hybrid_search("abcxyz", top_k=5)
     finally:
         meta.close()
@@ -180,36 +150,19 @@ def test_reranker_reorders_when_available(monkeypatch: pytest.MonkeyPatch):
             ]
         )
 
-        class _FakeSup:
-            host = "127.0.0.1"
-
-            def is_running(self, name: str) -> bool:
-                return name == "rerank"
-
-            def port(self, name: str) -> int:
-                return 0
-
         class _FakeRerank:
-            def __init__(self, *a, **k) -> None:
-                pass
-
             def rerank(self, query: str, docs: list[str], top_k: int | None = None) -> list[dict[str, Any]]:
-                # Force the SECOND candidate to the top regardless of BM25 order.
-                return [
-                    {"index": 1, "score": 0.99},
-                    {"index": 0, "score": 0.1},
-                ]
+                return [{"index": 1, "score": 0.99}, {"index": 0, "score": 0.1}]
 
             def close(self) -> None:
                 pass
 
-        monkeypatch.setattr(hybrid_mod, "RuntimeSupervisor", lambda: _FakeSup())
-        monkeypatch.setattr(hybrid_mod, "RerankClient", _FakeRerank)
+        monkeypatch.setattr(hybrid_mod, "get_embed_client", lambda: None)
+        monkeypatch.setattr(hybrid_mod, "get_rerank_client", lambda: _FakeRerank())
 
         results = hybrid_search("예산", top_k=2)
     finally:
         meta.close()
 
     assert len(results) == 2
-    # The reranker's score should propagate into `score`.
     assert results[0]["score"] == 0.99

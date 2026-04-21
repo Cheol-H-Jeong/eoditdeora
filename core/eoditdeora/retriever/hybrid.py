@@ -12,8 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from eoditdeora.config import load_settings
-from eoditdeora.runtime.clients import EmbedClient, RerankClient
-from eoditdeora.runtime.supervisor import RuntimeSupervisor
+from eoditdeora.runtime.clients import EmbedClient, RerankClient, get_embed_client, get_rerank_client
 from eoditdeora.storage.fts import FtsStore
 from eoditdeora.storage.meta import MetaStore
 from eoditdeora.storage.vectors import VectorStore
@@ -59,41 +58,44 @@ def hybrid_search(query: str, *, top_k: int = 10) -> list[dict[str, Any]]:
     meta = MetaStore()
     fts = FtsStore()
     vectors = VectorStore()
-    sup = RuntimeSupervisor()
     try:
         bm25_rows = fts.search(query, top_k=settings.search.bm25_top_k)
 
         dense_rows: list[dict[str, Any]] = []
-        if sup.is_running("embed"):
-            embed_client = EmbedClient(sup.host, sup.port("embed"))
+        embed_client = get_embed_client()
+        if embed_client is not None:
             try:
                 qvec = embed_client.embed([query])[0]
                 dense_rows = vectors.search(qvec, top_k=settings.search.dense_top_k)
+            except Exception as e:  # noqa: BLE001
+                log.info("embed_endpoint_failed_bm25_only", error=str(e))
             finally:
                 embed_client.close()
         else:
-            log.info("embed_backend_offline_using_bm25_only")
+            log.info("embed_endpoint_unconfigured_bm25_only")
 
         fused = _rrf_merge(bm25_rows, dense_rows)
         candidates = fused[: max(top_k * 3, 30)]
 
-        if sup.is_running("rerank") and candidates:
-            rerank_client = RerankClient(sup.host, sup.port("rerank"))
+        rerank_client = get_rerank_client()
+        if rerank_client is not None and candidates:
             try:
                 ranked = rerank_client.rerank(
                     query, [h.text for h in candidates], top_k=top_k
                 )
+                reranked: list[Hit] = []
+                for item in ranked:
+                    idx = item["index"]
+                    if 0 <= idx < len(candidates):
+                        cand = candidates[idx]
+                        cand.rerank_score = item["score"]
+                        reranked.append(cand)
+                if reranked:
+                    candidates = reranked
+            except Exception as e:  # noqa: BLE001
+                log.info("rerank_endpoint_failed_fusion_only", error=str(e))
             finally:
                 rerank_client.close()
-            reranked: list[Hit] = []
-            for item in ranked:
-                idx = item["index"]
-                if 0 <= idx < len(candidates):
-                    cand = candidates[idx]
-                    cand.rerank_score = item["score"]
-                    reranked.append(cand)
-            if reranked:
-                candidates = reranked
 
         results: list[dict[str, Any]] = []
         for h in candidates[:top_k]:

@@ -141,42 +141,51 @@ async def _autostart_status(_: dict[str, Any]) -> dict[str, Any]:
     return dict(status())
 
 
-async def _llm_ensure(_: dict[str, Any]) -> dict[str, Any]:
+async def _endpoints_health(_: dict[str, Any]) -> dict[str, Any]:
     from eoditdeora.runtime.supervisor import RuntimeSupervisor
 
-    return {"backends": RuntimeSupervisor().ensure_running()}
+    return {"roles": RuntimeSupervisor().health()}
 
 
-async def _models_status(_: dict[str, Any]) -> dict[str, Any]:
-    from eoditdeora.runtime import models
+async def _endpoints_discover(_: dict[str, Any]) -> dict[str, Any]:
+    from eoditdeora.runtime.endpoints import discover_local
 
-    return {"slots": models.all_status()}
+    return {"endpoints": [p.to_dict() for p in discover_local()]}
 
 
-async def _models_download(params: dict[str, Any]) -> dict[str, Any]:
+async def _endpoints_test(params: dict[str, Any]) -> dict[str, Any]:
+    from eoditdeora.runtime.endpoints import probe
+
+    base_url = str(params.get("base_url") or "")
+    api_key = str(params.get("api_key") or "")
+    api_kind = str(params.get("api_kind") or "openai")
+    return probe(base_url, api_key=api_key, api_kind=api_kind).to_dict()
+
+
+async def _endpoints_update(params: dict[str, Any]) -> dict[str, Any]:
+    """Write one role's endpoint config.
+
+    params: {"role": "llm|embed|rerank", "endpoint": {base_url, model_id, api_key, api_kind}}
+    """
     from eoditdeora.api.rpc_server import ERR_INVALID_PARAMS, RpcError
-    from eoditdeora.runtime import models
+    from eoditdeora.config import load_settings, save_settings
+    from eoditdeora.config.settings import EndpointConfig
 
-    key = str(params.get("key") or "")
-    if not key:
-        raise RpcError(ERR_INVALID_PARAMS, "missing 'key'")
+    role = str(params.get("role") or "")
+    if role not in {"llm", "embed", "rerank"}:
+        raise RpcError(ERR_INVALID_PARAMS, f"unknown role: {role!r}")
+    raw = params.get("endpoint") or {}
+    if not isinstance(raw, dict):
+        raise RpcError(ERR_INVALID_PARAMS, "endpoint must be an object")
     try:
-        return models.start_download(key)
-    except ValueError as e:
-        raise RpcError(ERR_INVALID_PARAMS, str(e)) from e
+        endpoint = EndpointConfig.model_validate(raw)
+    except Exception as e:  # noqa: BLE001
+        raise RpcError(ERR_INVALID_PARAMS, f"invalid endpoint: {e}") from e
 
-
-async def _models_cancel(params: dict[str, Any]) -> dict[str, Any]:
-    from eoditdeora.api.rpc_server import ERR_INVALID_PARAMS, RpcError
-    from eoditdeora.runtime import models
-
-    key = str(params.get("key") or "")
-    if not key:
-        raise RpcError(ERR_INVALID_PARAMS, "missing 'key'")
-    try:
-        return models.cancel_download(key)
-    except ValueError as e:
-        raise RpcError(ERR_INVALID_PARAMS, str(e)) from e
+    settings = load_settings()
+    setattr(settings.model, role, endpoint)
+    save_settings(settings)
+    return {"ok": True, "role": role, "endpoint": endpoint.model_dump(mode="json")}
 
 
 async def _first_run_bootstrap(_: dict[str, Any]) -> dict[str, Any]:
@@ -222,10 +231,10 @@ def register_all(server: RpcServer) -> None:
     server.register("autostart.enable", _autostart_enable)
     server.register("autostart.disable", _autostart_disable)
     server.register("autostart.status", _autostart_status)
-    server.register("llm.ensure", _llm_ensure)
-    server.register("models.status", _models_status)
-    server.register("models.download", _models_download)
-    server.register("models.cancel", _models_cancel)
+    server.register("endpoints.health", _endpoints_health)
+    server.register("endpoints.discover", _endpoints_discover)
+    server.register("endpoints.test", _endpoints_test)
+    server.register("endpoints.update", _endpoints_update)
     server.register("first_run.bootstrap", _first_run_bootstrap)
     server.register("forget", _forget)
     server.register("open_file", _open_file)

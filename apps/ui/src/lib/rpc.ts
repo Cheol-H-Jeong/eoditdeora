@@ -13,8 +13,6 @@ export async function rpc<T = unknown>(
 }
 
 export async function openInOs(path: string): Promise<void> {
-  // Route through the Python sidecar so the dev bridge, Tauri shell,
-  // and future native hosts all end up in the same code path.
   await rpc("open_file", { path });
 }
 
@@ -94,33 +92,62 @@ export async function autostartDisable(): Promise<unknown> {
   return rpc("autostart.disable");
 }
 
-export type ModelSlot = {
-  key: "llm" | "embed" | "rerank";
-  display: string;
-  target_path: string;
-  present: boolean;
-  running: boolean;
-  downloaded_bytes: number;
-  total_bytes: number;
-  percent: number;
-  error: string | null;
-  cancelled: boolean;
-  finished: boolean;
-  source_configured: boolean;
+// ---- endpoints ------------------------------------------------------------
+
+export type Role = "llm" | "embed" | "rerank";
+
+export type Endpoint = {
+  base_url: string;
+  model_id: string;
+  api_key: string;
+  api_kind: string;
 };
 
-export async function modelsStatus(): Promise<{ slots: ModelSlot[] }> {
-  return rpc<{ slots: ModelSlot[] }>("models.status");
+export type EndpointHealth = {
+  configured: boolean;
+  reachable: boolean;
+  error: string | null;
+  models: string[];
+  active_model: string;
+  base_url: string;
+  model_id: string;
+};
+
+export async function endpointsHealth(): Promise<{ roles: Record<Role, EndpointHealth> }> {
+  return rpc<{ roles: Record<Role, EndpointHealth> }>("endpoints.health");
 }
 
-export async function modelsDownload(key: string): Promise<ModelSlot> {
-  return rpc<ModelSlot>("models.download", { key });
+export type ProbeResult = {
+  base_url: string;
+  api_kind: string;
+  reachable: boolean;
+  models: string[];
+  error: string | null;
+};
+
+export async function endpointsDiscover(): Promise<{ endpoints: ProbeResult[] }> {
+  return rpc<{ endpoints: ProbeResult[] }>("endpoints.discover");
 }
 
-export async function modelsCancel(key: string): Promise<ModelSlot> {
-  return rpc<ModelSlot>("models.cancel", { key });
+export async function endpointsTest(base_url: string, api_key = "", api_kind = "openai"): Promise<ProbeResult> {
+  return rpc<ProbeResult>("endpoints.test", { base_url, api_key, api_kind });
 }
 
-export async function llmEnsure(): Promise<unknown> {
-  return rpc("llm.ensure");
+export async function endpointsUpdate(role: Role, endpoint: Endpoint): Promise<unknown> {
+  return rpc("endpoints.update", { role, endpoint });
+}
+
+export type Settings = {
+  model: {
+    llm: Endpoint;
+    embed: Endpoint;
+    rerank: Endpoint;
+    llm_context_tokens: number;
+  };
+  index: { roots: string[]; max_file_bytes: number };
+  search: { strict_provenance: boolean; bm25_top_k: number; dense_top_k: number; rerank_top_k: number };
+};
+
+export async function getSettings(): Promise<Settings> {
+  return rpc<Settings>("settings.get");
 }

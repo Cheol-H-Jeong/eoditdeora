@@ -79,32 +79,25 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         log.warning("first_run_bootstrap_failed", error=str(e))
 
-    # Surface user-configured GGUF download URLs to the download slots.
-    try:
-        from eoditdeora.runtime.models import autoconfigure_defaults
-
-        autoconfigure_defaults()
-    except Exception as e:  # noqa: BLE001
-        log.debug("models_autoconfigure_skipped", error=str(e))
-
     # Indexer daemon — watches the registered roots.
     from eoditdeora.indexer.daemon import get_daemon
 
     get_daemon().start()
     log.info("indexer_daemon_up")
 
-    # LLM runtime — start in a background thread so the UI can open even
-    # while model weights are still warming up.
-    def _ensure_llm() -> None:
+    # Log a one-shot probe of the configured endpoints so support bundles
+    # can confirm whether the user's inference server was reachable at
+    # launch. We do NOT spawn any model weights — that is the user's
+    # external serving layer's job.
+    def _probe_endpoints() -> None:
         try:
             from eoditdeora.runtime.supervisor import RuntimeSupervisor
 
-            states = RuntimeSupervisor().ensure_running()
-            log.info("llm_ensure_ran", states=states)
+            log.info("endpoints_probe", **RuntimeSupervisor().health())
         except Exception as e:  # noqa: BLE001
-            log.warning("llm_ensure_failed", error=str(e))
+            log.warning("endpoints_probe_failed", error=str(e))
 
-    threading.Thread(target=_ensure_llm, name="eddr-llm-init", daemon=True).start()
+    threading.Thread(target=_probe_endpoints, name="eddr-endpoint-probe", daemon=True).start()
 
     # HTTP bridge (same one the dev script uses).
     from importlib import import_module

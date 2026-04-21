@@ -11,14 +11,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from eoditdeora.runtime.clients import LlmClient
+from eoditdeora.runtime.clients import get_llm_client
 from eoditdeora.runtime.prompts import RAG_STRICT_SYSTEM, RAG_STRICT_USER
-from eoditdeora.runtime.supervisor import RuntimeSupervisor
 from eoditdeora.utils.logging import get_logger
 
 log = get_logger(__name__)
 
 _NO_ANSWER_SENTINEL = "근거 문서에 해당 정보가 없어"
+_NO_ENDPOINT_MSG = (
+    "로컬 LLM 엔드포인트가 설정되지 않았습니다. 설정 → LLM 엔드포인트에서 "
+    "이미 서빙 중인 엔드포인트를 선택하세요."
+)
 
 
 def _build_evidence(hits: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
@@ -48,20 +51,27 @@ def answer_strict(question: str, hits: list[dict[str, Any]]) -> dict[str, Any]:
             "citations": [],
         }
 
-    sup = RuntimeSupervisor()
-    if not sup.is_running("llm"):
+    client = get_llm_client()
+    if client is None:
         return {
             "answered": False,
-            "answer": "LLM 런타임이 준비되지 않았습니다. 모델 다운로드 및 시작을 확인하세요.",
+            "answer": _NO_ENDPOINT_MSG,
             "citations": [],
         }
 
     evidence, citations = _build_evidence(hits)
     user_prompt = RAG_STRICT_USER.format(question=question, evidence=evidence)
-
-    client = LlmClient(sup.host, sup.port("llm"))
     try:
-        text = client.chat(RAG_STRICT_SYSTEM, user_prompt, temperature=0.1, max_tokens=1024)
+        text = client.chat(
+            RAG_STRICT_SYSTEM, user_prompt, temperature=0.1, max_tokens=1024
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("llm_chat_failed", error=str(e))
+        return {
+            "answered": False,
+            "answer": f"LLM 엔드포인트 호출에 실패했습니다: {e}",
+            "citations": [],
+        }
     finally:
         client.close()
 

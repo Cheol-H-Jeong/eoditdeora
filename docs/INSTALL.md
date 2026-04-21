@@ -75,21 +75,38 @@ OS 로그인 즉시 어딨더라가 자동으로 기동됩니다.
 - 과거 파일 전부 → **catch-up scan** 으로 색인
 - 이후 추가/수정/삭제 → **watchdog** 이 실시간 감지하여 즉시 반영
 
-## LLM 모델 받기 (옵션 — 답변 모드 활성화)
+## LLM 엔드포인트 연결 (옵션 — 답변 모드 활성화)
 
-검색만 쓸 거면 생략해도 됩니다. Strict 근거 답변 기능을 쓰려면:
+어딨더라는 **모델 가중치를 직접 올리지 않습니다.** 이미 서빙 중인
+로컬 LLM API (vLLM, llama.cpp, Ollama, LM Studio 등)를 연결만 합니다.
+이미 돌고 있는 서버가 없으면 검색 모드는 BM25만으로 정상 작동하고,
+답변 모드는 설정 후에 활성화됩니다.
 
-```bash
-# Linux
-./Eoditdeora-*.AppImage --cli download-models
-# 또는 가중치를 직접 놓기
-cp gemma-4-26b-a4b-it.Q8_0.gguf  ~/.local/share/eoditdeora/models/
-cp bge-m3.Q8_0.gguf               ~/.local/share/eoditdeora/models/
-cp bge-reranker-v2-m3.Q8_0.gguf   ~/.local/share/eoditdeora/models/
-```
+### 연결 방법 (모두 창 안에서)
 
-모델이 있는 상태에서 실행하면 `llama-server` 3개가 자동 기동됩니다.
-공무원 오프라인 환경이면 USB로 위 파일들을 옮기고 끝.
+1. 우측 사이드바 **LLM 엔드포인트** 섹션 → **자동 탐색** 버튼
+2. 127.0.0.1 에서 발견된 서버가 목록으로 표시됨
+3. 원하는 서버의 `LLM에 지정` 클릭 → 모델 선택 → **저장**
+4. (옵션) 임베딩·리랭커 엔드포인트도 같은 방식으로 지정
+
+### 자동 탐색 대상 포트
+
+| 서버 | 기본 URL |
+|---|---|
+| llama.cpp `llama-server` | http://127.0.0.1:8080 |
+| vLLM | http://127.0.0.1:8000/v1 |
+| LM Studio | http://127.0.0.1:1234/v1 |
+| Ollama | http://127.0.0.1:11434/v1 |
+
+다른 포트나 원격 서버를 쓰려면 사이드바 입력란에 직접 URL 입력 후 저장.
+인증이 필요한 vLLM은 API key 필드 사용.
+
+### 왜 가중치를 직접 안 올리나?
+
+GPU 하나에 여러 모델을 중복 적재하면 컨텍스트·성능이 충돌합니다.
+사용자가 이미 운영 중인 로컬 LLM 파이프라인(예: oss-120b + Qwen)
+그대로 활용하는 게 가장 효율적이고, 유지보수 책임도 사용자 쪽에
+일관되게 남습니다.
 
 ## 제거
 

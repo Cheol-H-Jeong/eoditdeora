@@ -17,30 +17,45 @@ from eoditdeora.config.paths import get_paths
 SETTINGS_FILENAME = "settings.toml"
 
 
+class EndpointConfig(BaseModel):
+    """Connection info for an already-running OpenAI-compatible server.
+
+    Eoditdeora never spawns model weights of its own — it connects to
+    an existing inference server (llama.cpp, vLLM, Ollama, LM Studio,
+    etc.). Each of the three roles (llm / embed / rerank) points at
+    at most one endpoint. When `base_url` is empty the role is
+    considered disabled and the pipeline gracefully skips that stage.
+    """
+
+    base_url: str = ""
+    """Root URL. Examples:
+      http://127.0.0.1:8080         (llama-server, base has /v1/...)
+      http://127.0.0.1:8000/v1      (vLLM -- explicit /v1 prefix)
+      http://127.0.0.1:11434        (Ollama native)"""
+
+    model_id: str = ""
+    """Model name to send as the `model` field. Empty means 'use server
+    default / the single model currently loaded'."""
+
+    api_key: str = ""
+    """Only needed if the server was started with --api-key."""
+
+    api_kind: str = "openai"
+    """openai | ollama | llama_cpp_native — controls request formatting."""
+
+
 class ModelSettings(BaseModel):
-    """Which GGUF weights to load. Keep identifiers stable across versions
-    so users can swap models without code changes."""
+    """Which already-running inference endpoints Eoditdeora should use.
 
-    llm_model_id: str = "gemma-4-26b-a4b-it"
-    llm_quant: str = "Q8_0"
+    No weights are ever downloaded or loaded by this app. All compute
+    happens on a pre-existing local server the user operates.
+    """
+
+    llm: EndpointConfig = Field(default_factory=EndpointConfig)
+    embed: EndpointConfig = Field(default_factory=EndpointConfig)
+    rerank: EndpointConfig = Field(default_factory=EndpointConfig)
+
     llm_context_tokens: int = 32768
-
-    embedding_model_id: str = "bge-m3"
-    embedding_quant: str = "Q8_0"
-
-    reranker_model_id: str = "bge-reranker-v2-m3"
-    reranker_quant: str = "Q8_0"
-
-    llama_cpp_host: str = "127.0.0.1"
-    llama_cpp_llm_port: int = 17651
-    llama_cpp_embed_port: int = 17652
-    llama_cpp_rerank_port: int = 17653
-
-    # Optional per-slot download URLs for the three GGUFs. Keys must
-    # match the keys in runtime.models._SLOTS (llm / embed / rerank).
-    # When empty, the UI's "모델 다운로드" button stays disabled and
-    # tells the user where to set the URL.
-    gguf_urls: dict[str, str] = Field(default_factory=dict)
 
 
 class IndexSettings(BaseModel):

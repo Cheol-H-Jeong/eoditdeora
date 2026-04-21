@@ -20,7 +20,8 @@ async def test_settings_get_returns_defaults():
     server = RpcServer()
     resp = await _call(server, "settings.get")
     result = resp["result"]
-    assert result["model"]["llm_model_id"] == "gemma-4-26b-a4b-it"
+    # Endpoints start unset — user selects a running server.
+    assert result["model"]["llm"]["base_url"] == ""
     assert result["search"]["strict_provenance"] is True
 
 

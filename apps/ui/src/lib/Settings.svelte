@@ -1,25 +1,44 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import {
     addRoot,
     autostartDisable,
     autostartEnable,
     autostartStatus,
+    endpointsDiscover,
+    endpointsHealth,
+    endpointsTest,
+    endpointsUpdate,
+    getSettings,
     indexStatus,
-    llmEnsure,
-    modelsCancel,
-    modelsDownload,
-    modelsStatus,
     removeRoot,
     type AutostartStatus,
+    type Endpoint,
+    type EndpointHealth,
     type IndexStatus,
-    type ModelSlot,
+    type ProbeResult,
+    type Role,
   } from "./rpc";
+
+  const ROLE_LABELS: Record<Role, string> = {
+    llm: "LLM (답변용)",
+    embed: "임베딩 (의미 검색용)",
+    rerank: "리랭커 (정렬용)",
+  };
 
   let roots = $state<string[]>([]);
   let docCount = $state(0);
   let autostart = $state<AutostartStatus | null>(null);
-  let models = $state<ModelSlot[]>([]);
+
+  let endpoints = $state<Record<Role, Endpoint>>({
+    llm: { base_url: "", model_id: "", api_key: "", api_kind: "openai" },
+    embed: { base_url: "", model_id: "", api_key: "", api_kind: "openai" },
+    rerank: { base_url: "", model_id: "", api_key: "", api_kind: "openai" },
+  });
+  let health = $state<Record<Role, EndpointHealth | null>>({ llm: null, embed: null, rerank: null });
+  let discovered = $state<ProbeResult[]>([]);
+  let discovering = $state(false);
+
   let newPath = $state("");
   let busy = $state<Record<string, boolean>>({});
   let timer: number | undefined;
@@ -30,8 +49,14 @@
       roots = idx.roots;
       docCount = idx.index.doc_count;
       autostart = await autostartStatus();
-      const m = await modelsStatus();
-      models = m.slots;
+      const s = await getSettings();
+      endpoints = {
+        llm: s.model.llm,
+        embed: s.model.embed,
+        rerank: s.model.rerank,
+      };
+      const h = await endpointsHealth();
+      health = h.roles;
     } catch (e) {
       console.warn(e);
     }
@@ -39,7 +64,7 @@
 
   onMount(async () => {
     await refresh();
-    timer = window.setInterval(refresh, 1500);
+    timer = window.setInterval(refresh, 3000);
   });
 
   onDestroy(() => {
@@ -81,41 +106,55 @@
     }
   }
 
-  async function onDownload(key: string) {
-    busy = { ...busy, [key]: true };
+  async function onDiscover() {
+    discovering = true;
     try {
-      await modelsDownload(key);
+      const r = await endpointsDiscover();
+      discovered = r.endpoints;
+    } finally {
+      discovering = false;
+    }
+  }
+
+  async function saveEndpoint(role: Role) {
+    busy = { ...busy, [`save:${role}`]: true };
+    try {
+      await endpointsUpdate(role, endpoints[role]);
       await refresh();
     } finally {
-      busy = { ...busy, [key]: false };
+      busy = { ...busy, [`save:${role}`]: false };
     }
   }
 
-  async function onCancel(key: string) {
-    await modelsCancel(key);
-    await refresh();
+  async function clearEndpoint(role: Role) {
+    endpoints[role] = { base_url: "", model_id: "", api_key: "", api_kind: "openai" };
+    await saveEndpoint(role);
   }
 
-  async function onStartLlm() {
-    busy = { ...busy, llm: true };
+  async function testEndpoint(role: Role) {
+    const e = endpoints[role];
+    if (!e.base_url) return;
+    busy = { ...busy, [`test:${role}`]: true };
     try {
-      await llmEnsure();
-      await refresh();
+      const p = await endpointsTest(e.base_url, e.api_key, e.api_kind);
+      health[role] = {
+        ...(health[role] ?? { configured: true, base_url: e.base_url, model_id: e.model_id, active_model: "" }),
+        reachable: p.reachable,
+        error: p.error,
+        models: p.models,
+      };
     } finally {
-      busy = { ...busy, llm: false };
+      busy = { ...busy, [`test:${role}`]: false };
     }
   }
 
-  function fmt(bytes: number): string {
-    if (!bytes) return "0 B";
-    const units = ["B", "KB", "MB", "GB"];
-    let i = 0;
-    let v = bytes;
-    while (v >= 1024 && i < units.length - 1) {
-      v /= 1024;
-      i++;
-    }
-    return `${v.toFixed(v < 10 ? 1 : 0)} ${units[i]}`;
+  function pickDiscovered(role: Role, p: ProbeResult, modelId = "") {
+    endpoints[role] = {
+      base_url: p.base_url,
+      model_id: modelId || p.models[0] || "",
+      api_key: endpoints[role].api_key,
+      api_kind: p.api_kind,
+    };
   }
 </script>
 
@@ -130,12 +169,7 @@
         {#each roots as r}
           <li>
             <span class="path" title={r}>{r}</span>
-            <button
-              class="remove"
-              onclick={() => onRemove(r)}
-              disabled={busy[r]}
-              title="인덱스에서 제거 (원본 파일은 그대로)"
-            >제거</button>
+            <button class="remove" onclick={() => onRemove(r)} disabled={busy[r]}>제거</button>
           </li>
         {/each}
       </ul>
@@ -169,53 +203,115 @@
   </section>
 
   <section>
-    <h2>로컬 LLM 모델</h2>
-    <p class="hint">답변 모드를 쓰려면 아래 3개 모두 다운로드. 다 받으면 자동으로 LLM이 기동됩니다.</p>
-    {#each models as m}
-      <div class="model" class:present={m.present} class:running={m.running}>
+    <h2>LLM 엔드포인트</h2>
+    <p class="hint">
+      이 앱은 모델 가중치를 직접 올리지 않습니다. 이미 서빙 중인 로컬
+      엔드포인트를 고르면 연결만 합니다.
+    </p>
+
+    <div class="discover-row">
+      <button onclick={onDiscover} disabled={discovering}>
+        {discovering ? "탐색 중..." : "자동 탐색"}
+      </button>
+      <span class="hint small">127.0.0.1 의 주요 포트 조회</span>
+    </div>
+
+    {#if discovered.length}
+      <ul class="discovered">
+        {#each discovered as d}
+          <li>
+            <div class="row">
+              <span class="url">{d.base_url}</span>
+              <span class="muted small">{d.models.length}개 모델</span>
+            </div>
+            <div class="models">
+              {#each d.models as m}
+                <span class="modelchip" title={m}>{m}</span>
+              {/each}
+            </div>
+            <div class="row">
+              {#each ["llm", "embed", "rerank"] as r}
+                <button
+                  class="pick"
+                  onclick={() => pickDiscovered(r as Role, d, d.models[0] ?? "")}
+                >{ROLE_LABELS[r as Role]}에 지정</button>
+              {/each}
+            </div>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+
+    {#each ["llm", "embed", "rerank"] as role}
+      {@const r = role as Role}
+      <div class="slot" class:ok={health[r]?.reachable}>
         <div class="row">
-          <span class="name">{m.display}</span>
+          <span class="name">{ROLE_LABELS[r]}</span>
           <span class="badge">
-            {#if m.present}설치됨{:else if m.running}다운로드 중{:else if m.error}오류{:else}미설치{/if}
+            {#if !endpoints[r].base_url}
+              미설정
+            {:else if health[r]?.reachable}
+              연결됨
+            {:else if health[r]?.error}
+              오류
+            {:else}
+              확인 중
+            {/if}
           </span>
         </div>
-        {#if m.running}
-          <div class="bar">
-            <div class="fill" style={`width:${m.percent.toFixed(1)}%`}></div>
-          </div>
-          <div class="row small">
-            <span>{m.percent.toFixed(1)}%</span>
-            <span>{fmt(m.downloaded_bytes)} / {fmt(m.total_bytes)}</span>
-            <button class="cancel" onclick={() => onCancel(m.key)}>취소</button>
-          </div>
-        {:else if m.present}
-          <p class="small muted" title={m.target_path}>{m.target_path.split('/').pop()}</p>
-        {:else if m.error}
-          <p class="small err">{m.error}</p>
-          <button onclick={() => onDownload(m.key)} disabled={busy[m.key]}>다시 시도</button>
-        {:else}
-          <button
-            onclick={() => onDownload(m.key)}
-            disabled={busy[m.key] || !m.source_configured}
-          >다운로드</button>
-          {#if !m.source_configured}
-            <p class="small muted">
-              설정 파일에 다운로드 URL을 지정해야 합니다.
-              (settings.toml의 model.gguf_urls.{m.key})
-            </p>
+        <input
+          class="url-input"
+          type="text"
+          placeholder="base URL (http://127.0.0.1:8080)"
+          bind:value={endpoints[r].base_url}
+        />
+        <div class="row small">
+          {#if health[r]?.models?.length}
+            <select bind:value={endpoints[r].model_id}>
+              <option value="">(서버 기본)</option>
+              {#each health[r].models as m}
+                <option value={m}>{m}</option>
+              {/each}
+            </select>
+          {:else}
+            <input
+              class="model-input"
+              type="text"
+              placeholder="model id (선택)"
+              bind:value={endpoints[r].model_id}
+            />
           {/if}
+          <select bind:value={endpoints[r].api_kind}>
+            <option value="openai">OpenAI 호환</option>
+            <option value="ollama">Ollama 네이티브</option>
+          </select>
+        </div>
+        <input
+          class="key-input"
+          type="password"
+          placeholder="API key (선택)"
+          bind:value={endpoints[r].api_key}
+        />
+        {#if health[r]?.error}
+          <p class="small err">{health[r].error}</p>
         {/if}
+        <div class="row small actions">
+          <button onclick={() => testEndpoint(r)} disabled={busy[`test:${r}`] || !endpoints[r].base_url}>
+            테스트
+          </button>
+          <button onclick={() => saveEndpoint(r)} disabled={busy[`save:${r}`]}>
+            저장
+          </button>
+          <button class="cancel" onclick={() => clearEndpoint(r)}>초기화</button>
+        </div>
       </div>
     {/each}
-    <button class="ensure" onclick={onStartLlm} disabled={busy.llm}>
-      지금 LLM 기동 시도
-    </button>
   </section>
 </aside>
 
 <style>
   .sidebar {
-    width: 320px;
+    width: 340px;
     padding: 24px 18px;
     border-left: 1px solid #1f2330;
     background: #0e1117;
@@ -223,9 +319,7 @@
     overflow-y: auto;
     height: 100vh;
   }
-  section {
-    margin-bottom: 24px;
-  }
+  section { margin-bottom: 24px; }
   h2 {
     font-size: 13px;
     text-transform: uppercase;
@@ -233,165 +327,77 @@
     color: #8ab4ff;
     margin: 0 0 8px;
   }
-  .hint {
-    margin: 0 0 10px;
-    font-size: 11px;
-    color: #8a94a3;
-    line-height: 1.5;
-  }
-  .hint.small,
-  .small {
-    font-size: 10.5px;
-  }
-  .muted {
-    color: #6b7280;
-  }
-  .err {
-    color: #ff9c9c;
-  }
+  .hint { margin: 0 0 10px; font-size: 11px; color: #8a94a3; line-height: 1.5; }
+  .hint.small, .small { font-size: 10.5px; }
+  .muted { color: #6b7280; }
+  .err { color: #ff9c9c; }
   ul.roots {
-    list-style: none;
-    padding: 0;
-    margin: 0 0 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
+    list-style: none; padding: 0; margin: 0 0 8px;
+    display: flex; flex-direction: column; gap: 6px;
   }
   ul.roots li {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    background: #141822;
-    border: 1px solid #1e2230;
-    border-radius: 8px;
-    padding: 8px 10px;
+    display: flex; gap: 8px; align-items: center;
+    background: #141822; border: 1px solid #1e2230;
+    border-radius: 8px; padding: 8px 10px;
   }
   .path {
-    flex: 1;
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 11px;
-    color: #c7cbd3;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    flex: 1; font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 11px; color: #c7cbd3;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .remove {
-    font-size: 11px;
-    background: transparent;
-    border: 1px solid #2a2f3a;
-    color: #c7cbd3;
-    border-radius: 6px;
-    padding: 3px 8px;
-    cursor: pointer;
+    font-size: 11px; background: transparent; border: 1px solid #2a2f3a;
+    color: #c7cbd3; border-radius: 6px; padding: 3px 8px; cursor: pointer;
   }
-  .remove:hover {
-    border-color: #ff9c9c;
-    color: #ff9c9c;
-  }
-  .empty {
-    font-size: 12px;
-    color: #6b7280;
-    margin: 0 0 10px;
-  }
-  .add {
-    display: flex;
-    gap: 6px;
-    margin-top: 4px;
-  }
-  .add input {
-    flex: 1;
-    background: #0f131b;
-    border: 1px solid #1f2330;
-    border-radius: 6px;
-    color: #e8e8ea;
-    font-size: 12px;
-    padding: 6px 8px;
-    outline: none;
-  }
-  .add button,
-  .model button,
-  .ensure {
-    background: #4b7bff;
-    color: #fff;
-    border: 0;
-    border-radius: 6px;
-    padding: 6px 10px;
-    font-size: 12px;
-    cursor: pointer;
-  }
-  .add button:disabled,
-  .model button:disabled,
-  .ensure:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-  .ensure {
+  .empty { font-size: 12px; color: #6b7280; margin: 0 0 10px; }
+  .add { display: flex; gap: 6px; margin-top: 4px; }
+  input, select {
+    background: #0f131b; border: 1px solid #1f2330; border-radius: 6px;
+    color: #e8e8ea; font-size: 12px; padding: 6px 8px; outline: none;
     width: 100%;
-    margin-top: 6px;
-    background: #2a2f3a;
   }
-  .stat {
-    margin: 6px 0 0;
-    font-size: 11px;
-    color: #8a94a3;
+  .add input { flex: 1; }
+  button {
+    background: #4b7bff; color: #fff; border: 0; border-radius: 6px;
+    padding: 6px 10px; font-size: 12px; cursor: pointer;
   }
-  .toggle {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    font-size: 12px;
-    cursor: pointer;
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.cancel { background: #2a2f3a; color: #a0a6b0; }
+  .stat { margin: 6px 0 0; font-size: 11px; color: #8a94a3; }
+  .toggle { display: flex; gap: 8px; align-items: center; font-size: 12px; cursor: pointer; }
+  .discover-row {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
   }
-  .model {
-    background: #141822;
-    border: 1px solid #1e2230;
-    border-radius: 8px;
-    padding: 10px 12px;
-    margin-bottom: 8px;
+  ul.discovered {
+    list-style: none; padding: 0; margin: 0 0 12px;
+    display: flex; flex-direction: column; gap: 8px;
   }
-  .model.present {
-    border-color: #0f4f2d;
+  ul.discovered li {
+    background: #141822; border: 1px solid #1e2230;
+    border-radius: 8px; padding: 10px;
   }
-  .model.running {
-    border-color: #4b7bff;
+  .url { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+  .models { display: flex; gap: 4px; flex-wrap: wrap; margin: 6px 0; }
+  .modelchip {
+    font-size: 10px; padding: 2px 6px; border-radius: 6px;
+    background: #1f2330; color: #a0a6b0;
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 4px;
+  .pick {
+    font-size: 10.5px; background: #222731; color: #8ab4ff; padding: 3px 6px;
   }
-  .name {
-    font-size: 12px;
-    font-weight: 600;
+  .slot {
+    background: #141822; border: 1px solid #1e2230;
+    border-radius: 8px; padding: 10px 12px; margin-bottom: 8px;
+    display: flex; flex-direction: column; gap: 6px;
   }
+  .slot.ok { border-color: #0f4f2d; }
+  .row { display: flex; gap: 6px; align-items: center; justify-content: space-between; }
+  .row.small > * { flex: 1; min-width: 0; }
+  .name { font-size: 12px; font-weight: 600; }
   .badge {
-    font-size: 10px;
-    padding: 2px 6px;
-    border-radius: 999px;
-    background: #1f2330;
-    color: #a0a6b0;
+    font-size: 10px; padding: 2px 6px; border-radius: 999px;
+    background: #1f2330; color: #a0a6b0;
   }
-  .bar {
-    height: 4px;
-    background: #1f2330;
-    border-radius: 2px;
-    margin: 4px 0 6px;
-    overflow: hidden;
-  }
-  .fill {
-    height: 100%;
-    background: #4b7bff;
-    transition: width 200ms linear;
-  }
-  .cancel {
-    background: transparent;
-    border: 1px solid #2a2f3a;
-    color: #a0a6b0;
-    border-radius: 4px;
-    padding: 1px 6px;
-    font-size: 10.5px;
-    cursor: pointer;
-  }
+  .actions { justify-content: flex-start; }
 </style>
