@@ -67,6 +67,7 @@
     } catch {
       // Non-Tauri host (dev bridge) has no event bus.
     }
+    window.addEventListener("keydown", onGlobalKeydown);
     inputEl?.focus();
     startProgressPoll();
     startHealthPoll();
@@ -76,7 +77,35 @@
     if (progressTimer) window.clearInterval(progressTimer);
     if (healthTimer) window.clearInterval(healthTimer);
     if (debounceTimer) window.clearTimeout(debounceTimer);
+    window.removeEventListener("keydown", onGlobalKeydown);
   });
+
+  function onGlobalKeydown(e: KeyboardEvent) {
+    // Power-user chords. Use metaKey (Cmd) on macOS, ctrlKey elsewhere.
+    const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
+    const mod = isMac ? e.metaKey : e.ctrlKey;
+    if (mod && e.key === "k") {
+      e.preventDefault();
+      inputEl?.focus();
+      inputEl?.select();
+      return;
+    }
+    if (mod && e.key === ",") {
+      e.preventDefault();
+      showSidebar = !showSidebar;
+      return;
+    }
+    if (mod && (e.key === "1" || e.key === "2" || e.key === "3")) {
+      e.preventDefault();
+      const map: Record<string, Mode> = { "1": "name", "2": "content", "3": "ai" };
+      onTabClick(map[e.key]);
+      inputEl?.focus();
+      return;
+    }
+    if (e.key === "Escape" && showSidebar && document.activeElement === document.body) {
+      showSidebar = false;
+    }
+  }
 
   function startProgressPoll() {
     const tick = async () => {
@@ -342,18 +371,39 @@
       </div>
     </header>
 
-    <div class="tabs">
-      <button class="tab" class:active={mode === "name"} onclick={() => onTabClick("name")}>
+    <div class="tabs" role="tablist" aria-label="검색 모드">
+      <button
+        class="tab"
+        class:active={mode === "name"}
+        role="tab"
+        aria-selected={mode === "name"}
+        aria-keyshortcuts="Control+1"
+        onclick={() => onTabClick("name")}
+      >
         <span class="tab-title">파일명</span>
-        <span class="tab-hint">실시간</span>
+        <span class="tab-hint">실시간 · ⌘1</span>
       </button>
-      <button class="tab" class:active={mode === "content"} onclick={() => onTabClick("content")}>
+      <button
+        class="tab"
+        class:active={mode === "content"}
+        role="tab"
+        aria-selected={mode === "content"}
+        aria-keyshortcuts="Control+2"
+        onclick={() => onTabClick("content")}
+      >
         <span class="tab-title">내용</span>
-        <span class="tab-hint">키워드 · AI 불필요</span>
+        <span class="tab-hint">키워드 · ⌘2</span>
       </button>
-      <button class="tab" class:active={mode === "ai"} onclick={() => onTabClick("ai")}>
+      <button
+        class="tab"
+        class:active={mode === "ai"}
+        role="tab"
+        aria-selected={mode === "ai"}
+        aria-keyshortcuts="Control+3"
+        onclick={() => onTabClick("ai")}
+      >
         <span class="tab-title">AI</span>
-        <span class="tab-hint">답변 생성</span>
+        <span class="tab-hint">답변 · ⌘3</span>
       </button>
     </div>
 
@@ -363,13 +413,14 @@
         bind:value={query}
         onkeydown={onKeydown}
         placeholder={mode === "name"
-          ? "파일명 / 경로 일부 — 타이핑하면 바로 나옵니다"
+          ? "파일명 / 경로 일부 — 타이핑하면 바로 나옵니다 (⌘K 포커스)"
           : mode === "content"
-          ? "문서 본문에서 찾을 키워드 (Enter)"
+          ? "키워드 또는 \"구문\" -제외 (Enter)"
           : "무엇이 궁금한가요? (Enter)"}
         autocomplete="off"
         autocorrect="off"
         spellcheck="false"
+        aria-label="검색어"
       />
     </div>
 
@@ -677,6 +728,11 @@
   }
   .tab.active .tab-hint {
     color: #8ab4ff;
+  }
+  .tab:focus-visible, .gear:focus-visible, .health:focus-visible,
+  .card:focus-visible, .file-row:focus-visible, input:focus-visible {
+    outline: 2px solid #4b7bff;
+    outline-offset: 2px;
   }
   .bar {
     display: flex;
