@@ -344,7 +344,7 @@ async def _open_file(params: dict[str, Any]) -> dict[str, Any]:
     import sys
     from pathlib import Path
 
-    from eoditdeora.api.rpc_server import ERR_INVALID_PARAMS, ERR_OPEN_FAILED, RpcError
+    from eoditdeora.api.rpc_server import ERR_OPEN_FAILED, RpcError
 
     def _raise_if_launcher_failed(
         process: subprocess.Popen[str],
@@ -372,10 +372,7 @@ async def _open_file(params: dict[str, Any]) -> dict[str, Any]:
             },
         )
 
-    raw = params.get("path")
-    if not raw:
-        raise RpcError(ERR_INVALID_PARAMS, "missing 'path'")
-    target = Path(str(raw)).expanduser()
+    target = Path(_parse_path_param(params)).expanduser()
     if not target.exists():
         raise RpcError(
             ERR_OPEN_FAILED,

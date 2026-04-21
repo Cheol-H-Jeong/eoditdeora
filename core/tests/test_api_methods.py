@@ -341,6 +341,16 @@ async def test_open_file_returns_structured_not_found_error(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_open_file_rejects_blank_path():
+    server = RpcServer()
+
+    resp = await _call(server, "open_file", {"path": "   "})
+
+    assert resp["error"]["code"] == ERR_INVALID_PARAMS
+    assert resp["error"]["message"] == "missing 'path'"
+
+
+@pytest.mark.asyncio
 async def test_open_file_returns_structured_launcher_missing_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
