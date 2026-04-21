@@ -8,6 +8,7 @@ handles the common subset used by office-exported RTF files.
 
 from __future__ import annotations
 
+import codecs
 from pathlib import Path
 
 from eoditdeora.parsers.base import Block, ParsedDoc, ParseResult
@@ -117,23 +118,35 @@ def _extract_rtf_text(raw: bytes) -> str | None:
         return None
 
     out: list[str] = []
-    stack: list[tuple[bool, int]] = []
+    stack: list[tuple[bool, int, str]] = []
     ignorable = False
     unicode_skip = 1
+    ansi_encoding = "cp1252"
+    ansi_bytes = bytearray()
     i = 0
+
+    def _flush_ansi_bytes() -> None:
+        if ignorable or not ansi_bytes:
+            ansi_bytes.clear()
+            return
+        out.append(ansi_bytes.decode(ansi_encoding, errors="replace"))
+        ansi_bytes.clear()
 
     while i < len(text):
         ch = text[i]
         if ch == "{":
-            stack.append((ignorable, unicode_skip))
+            _flush_ansi_bytes()
+            stack.append((ignorable, unicode_skip, ansi_encoding))
             i += 1
             continue
         if ch == "}":
+            _flush_ansi_bytes()
             if stack:
-                ignorable, unicode_skip = stack.pop()
+                ignorable, unicode_skip, ansi_encoding = stack.pop()
             i += 1
             continue
         if ch != "\\":
+            _flush_ansi_bytes()
             if not ignorable:
                 out.append(ch)
             i += 1
@@ -145,6 +158,7 @@ def _extract_rtf_text(raw: bytes) -> str | None:
         token = text[i]
 
         if token in "\\{}":
+            _flush_ansi_bytes()
             if not ignorable:
                 out.append(token)
             i += 1
@@ -155,25 +169,29 @@ def _extract_rtf_text(raw: bytes) -> str | None:
                 hex_code = text[i + 1 : i + 3]
                 try:
                     if not ignorable:
-                        out.append(bytes([int(hex_code, 16)]).decode("cp1252"))
-                except (ValueError, UnicodeDecodeError):
+                        ansi_bytes.append(int(hex_code, 16))
+                except ValueError:
+                    _flush_ansi_bytes()
                     if not ignorable:
                         out.append(_UNICODE_CHAR_REPLACEMENT)
                 i += 3
                 continue
 
         if token == "*":
+            _flush_ansi_bytes()
             ignorable = True
             i += 1
             continue
 
         if token in ("~", "_", "-"):
+            _flush_ansi_bytes()
             if not ignorable:
                 out.append(" " if token == "~" else "-")
             i += 1
             continue
 
         if not token.isalpha():
+            _flush_ansi_bytes()
             i += 1
             continue
 
@@ -193,8 +211,13 @@ def _extract_rtf_text(raw: bytes) -> str | None:
         param = sign * int(text[num_start:i]) if i > num_start else None
 
         if word == "uc" and param is not None:
+            _flush_ansi_bytes()
             unicode_skip = max(param, 0)
+        elif word == "ansicpg" and param is not None:
+            _flush_ansi_bytes()
+            ansi_encoding = _resolve_ansicpg(param) or ansi_encoding
         elif word == "u" and param is not None:
+            _flush_ansi_bytes()
             if not ignorable:
                 codepoint = param if param >= 0 else param + 65536
                 try:
@@ -211,27 +234,50 @@ def _extract_rtf_text(raw: bytes) -> str | None:
                 skipped += 1
             continue
         elif word == "par":
+            _flush_ansi_bytes()
             if not ignorable:
                 out.append("\n\n")
         elif word == "line":
+            _flush_ansi_bytes()
             if not ignorable:
                 out.append("\n")
         elif word == "tab":
+            _flush_ansi_bytes()
             if not ignorable:
                 out.append("\t")
         elif word in ("emdash", "endash"):
+            _flush_ansi_bytes()
             if not ignorable:
                 out.append("-")
         elif word == "bullet":
+            _flush_ansi_bytes()
             if not ignorable:
                 out.append("•")
         elif word in _IGNORABLE_DESTINATIONS:
+            _flush_ansi_bytes()
             ignorable = True
 
         if i < len(text) and text[i] == " ":
             i += 1
 
+    _flush_ansi_bytes()
     return _normalize_text("".join(out))
+
+
+def _resolve_ansicpg(codepage: int) -> str | None:
+    if codepage <= 0:
+        return None
+    aliases = {
+        65001: "utf-8",
+        1200: "utf-16le",
+        1201: "utf-16be",
+    }
+    if codepage in aliases:
+        return aliases[codepage]
+    try:
+        return codecs.lookup(f"cp{codepage}").name
+    except LookupError:
+        return None
 
 
 def _normalize_text(text: str) -> str:

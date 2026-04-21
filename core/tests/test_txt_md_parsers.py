@@ -73,6 +73,20 @@ def test_rtf_parser_ignores_metadata_groups_and_decodes_hex_escapes(tmp_path: Pa
     assert [b.text for b in res.doc.blocks] == ["Café budget\tdraft"]
 
 
+def test_rtf_parser_decodes_cp949_hex_escapes(tmp_path: Path):
+    f = tmp_path / "legacy-korean.rtf"
+    f.write_text(
+        "{\\rtf1\\ansi\\ansicpg949\\deff0 "
+        "\\pard "
+        "\\'c7\\'d1\\'b1\\'db "
+        "\\'bf\\'b9\\'bb\\'ea\\'be\\'c8\\par}",
+        encoding="latin-1",
+    )
+    res = RtfParser().parse(f, doc_id="sha256:" + "0" * 64)
+    assert res.doc.parse_status == "ok"
+    assert [b.text for b in res.doc.blocks] == ["한글 예산안"]
+
+
 def test_odt_parser_extracts_headings_paragraphs_and_metadata(tmp_path: Path):
     f = tmp_path / "memo.odt"
     _write_odf_zip(
