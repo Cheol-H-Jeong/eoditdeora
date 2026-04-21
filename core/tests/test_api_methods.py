@@ -173,3 +173,34 @@ async def test_open_file_returns_structured_launcher_missing_error(
     assert resp["error"]["data"]["reason"] == "launcher_missing"
     assert resp["error"]["data"]["path"] == str(target)
     assert "xdg-open missing" in resp["error"]["data"]["detail"]
+
+
+@pytest.mark.asyncio
+async def test_open_file_returns_structured_launcher_failed_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    server = RpcServer()
+    target = tmp_path / "sample.txt"
+    target.write_text("x", encoding="utf-8")
+
+    class FakeProcess:
+        returncode = 3
+
+        def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+            assert timeout == 0.2
+            return ("", "no application is registered")
+
+    def fake_popen(*_args: Any, **_kwargs: Any) -> FakeProcess:  # type: ignore[no-untyped-def]
+        return FakeProcess()
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    resp = await _call(server, "open_file", {"path": str(target)})
+
+    assert resp["error"]["code"] == ERR_OPEN_FAILED
+    assert resp["error"]["message"] == "open failed"
+    assert resp["error"]["data"]["reason"] == "launcher_failed"
+    assert resp["error"]["data"]["path"] == str(target)
+    assert "no application is registered" in resp["error"]["data"]["detail"]

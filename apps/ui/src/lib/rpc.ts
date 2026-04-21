@@ -111,6 +111,9 @@ export function formatRpcError(error: unknown): string {
       if (reason === "launcher_missing") {
         return `파일을 열 프로그램 연결을 찾지 못했습니다. 운영체제 기본 앱 연결을 확인하세요.${detailSuffix(error.data?.detail)}`;
       }
+      if (reason === "launcher_failed") {
+        return `파일을 여는 기본 앱이 실행되지 않았습니다. 운영체제 파일 연결과 앱 설치 상태를 확인하세요.${detailSuffix(error.data?.detail)}`;
+      }
       if (reason === "spawn_failed") {
         return `파일을 여는 중 오류가 발생했습니다.${detailSuffix(error.data?.detail)}`;
       }

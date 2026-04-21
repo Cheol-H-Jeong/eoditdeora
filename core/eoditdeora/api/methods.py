@@ -292,6 +292,32 @@ async def _open_file(params: dict[str, Any]) -> dict[str, Any]:
 
     from eoditdeora.api.rpc_server import ERR_INVALID_PARAMS, ERR_OPEN_FAILED, RpcError
 
+    def _raise_if_launcher_failed(
+        process: subprocess.Popen[str],
+        *,
+        target_path: Path,
+    ) -> None:
+        try:
+            _stdout, stderr = process.communicate(timeout=0.2)
+        except subprocess.TimeoutExpired:
+            # `open` / `xdg-open` may stay alive briefly while the desktop
+            # environment hands off to the associated application. Reap the
+            # process in a background thread so we do not leave zombies behind.
+            threading.Thread(target=process.communicate, daemon=True).start()
+            return
+        if process.returncode in (None, 0):
+            return
+        detail = (stderr or "").strip() or f"launcher exited with code {process.returncode}"
+        raise RpcError(
+            ERR_OPEN_FAILED,
+            "open failed",
+            {
+                "reason": "launcher_failed",
+                "path": str(target_path),
+                "detail": detail,
+            },
+        )
+
     raw = params.get("path")
     if not raw:
         raise RpcError(ERR_INVALID_PARAMS, "missing 'path'")
@@ -307,21 +333,32 @@ async def _open_file(params: dict[str, Any]) -> dict[str, Any]:
         if sys.platform == "win32":
             os.startfile(str(target))  # type: ignore[attr-defined]
         elif sys.platform == "darwin":
-            subprocess.Popen(["open", str(target)], close_fds=True)  # noqa: S603,S607
+            process = subprocess.Popen(  # noqa: S603,S607
+                ["open", str(target)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                close_fds=True,
+            )
+            _raise_if_launcher_failed(process, target_path=target)
         else:
-            subprocess.Popen(  # noqa: S603
+            process = subprocess.Popen(  # noqa: S603
                 ["xdg-open", str(target)],
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
                 close_fds=True,
                 start_new_session=True,
             )
+            _raise_if_launcher_failed(process, target_path=target)
     except FileNotFoundError as e:
         raise RpcError(
             ERR_OPEN_FAILED,
             "open failed",
             {"reason": "launcher_missing", "path": str(target), "detail": str(e)},
         ) from e
+    except RpcError:
+        raise
     except Exception as e:  # noqa: BLE001
         raise RpcError(
             ERR_OPEN_FAILED,
