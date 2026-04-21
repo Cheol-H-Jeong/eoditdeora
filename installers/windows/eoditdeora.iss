@@ -6,7 +6,7 @@
 #define AppId         "{{4B0F8B2E-4D6C-4E6E-9C1E-EODITDEORA-0001}"
 #define AppName       "Eoditdeora"
 #define AppDisplay    "어딨더라 (Eoditdeora)"
-#define AppVersion    "0.1.3"
+#define AppVersion    "1.0.0"
 #define AppPublisher  "Eoditdeora Project"
 #define AppUrl        "https://github.com/Cheol-H-Jeong/eoditdeora"
 #define AppSupport    "https://github.com/Cheol-H-Jeong/eoditdeora/issues"

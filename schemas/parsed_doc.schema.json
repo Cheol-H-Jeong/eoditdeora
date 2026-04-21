@@ -67,6 +67,12 @@
       "items": { "type": "string" },
       "default": []
     },
+    "parse_status": {
+      "type": "string",
+      "enum": [
+        "ok", "empty", "encrypted", "invalid_format", "file_missing", "parser_error", "parser_timeout"
+      ]
+    },
     "parse_ms": {
       "type": "integer",
       "description": "Wall-clock ms spent parsing. Used for perf telemetry (local only)."

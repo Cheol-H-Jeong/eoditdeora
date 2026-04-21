@@ -73,6 +73,7 @@ class IndexSettings(BaseModel):
     roots: list[str] = Field(default_factory=list)
     ignore_patterns: list[str] = Field(default_factory=list)
     max_file_bytes: int = 256 * 1024 * 1024  # 256 MB hard cap
+    parser_timeout_sec: int = 60
     incremental_interval_sec: int = 30
     batch_understand_hour: int = 2  # 2am local time for heavy LLM batching
     # Extension set for the fast (Everything-tier) file-name index.

@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
+import queue
+import threading
 import time
 from pathlib import Path
 
 from eoditdeora.collector.model import ChangeKind, CollectedFile
+from eoditdeora.config import load_settings
 from eoditdeora.indexer.chunker import chunk_parsed
 from eoditdeora.parsers.base import ParsedDoc
-from eoditdeora.parsers.registry import parse_file
+from eoditdeora.parsers.registry import parse_file, resolve_parser
 from eoditdeora.storage.fts import FtsStore
 from eoditdeora.storage.meta import MetaStore
 from eoditdeora.storage.vectors import VectorStore
@@ -60,6 +63,48 @@ def _upsert_parsed_doc(
             "metadata_json": json.dumps(doc.metadata, ensure_ascii=False, default=str),
         }
     )
+
+
+def _parse_with_timeout(path: Path, *, doc_id: str, timeout_sec: int):
+    done = threading.Event()
+    result_queue: "queue.Queue[tuple[str, object]]" = queue.Queue(maxsize=1)
+    parser = resolve_parser(path)
+
+    def _worker() -> None:
+        try:
+            result_queue.put(("result", parse_file(path, doc_id=doc_id)))
+        except Exception as e:  # noqa: BLE001
+            result_queue.put(("error", e))
+        finally:
+            done.set()
+
+    started = time.monotonic()
+    threading.Thread(target=_worker, name=f"parse:{path.name}", daemon=True).start()
+    if not done.wait(timeout=timeout_sec):
+        elapsed = time.monotonic() - started
+        log.warning(
+            "parser_timeout",
+            path=str(path),
+            parser=parser.name if parser is not None else "unknown",
+            elapsed=round(elapsed, 3),
+            timeout_sec=timeout_sec,
+        )
+        return ParsedDoc(
+            doc_id=doc_id,
+            source_path=str(path),
+            source_path_display=display_path(path),
+            format=(path.suffix.lower().lstrip(".") or "unknown"),
+            parser="timeout_guard",
+            fidelity=1,
+            parse_status="parser_timeout",
+            warnings=[f"exceeded {timeout_sec}s"],
+            parse_ms=int(elapsed * 1000),
+        )
+
+    kind, payload = result_queue.get()
+    if kind == "error":
+        raise payload
+    return payload
 
 
 def index_file(
@@ -128,8 +173,10 @@ def index_file(
         fts.delete_doc(old_id)
         vectors.delete_doc(old_id)
 
+    timeout_sec = max(1, int(load_settings().index.parser_timeout_sec))
+
     try:
-        result = parse_file(path, doc_id=doc_id)
+        result = _parse_with_timeout(path, doc_id=doc_id, timeout_sec=timeout_sec)
     except Exception as e:  # noqa: BLE001
         result = type("ParseResultShim", (), {})()
         result.doc = ParsedDoc(
@@ -142,7 +189,7 @@ def index_file(
             parse_status="parser_error",
             warnings=[str(e)],
         )
-    doc = result.doc
+    doc = result if isinstance(result, ParsedDoc) else result.doc
     now_ns = time.time_ns()
     _upsert_parsed_doc(cf=cf, meta=meta, doc=doc, path=path, indexed_at=now_ns)
 

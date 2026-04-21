@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-VERSION="${1:-0.1.3}"
+VERSION="${1:-1.0.0}"
 ARCH="x86_64"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${HERE}/../.." && pwd)"

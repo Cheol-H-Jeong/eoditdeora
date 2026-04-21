@@ -242,10 +242,13 @@ class IndexerDaemon:
                     result = index_file(item, meta=meta, fts=fts, vectors=vectors)
                     with self._lock:
                         status = str(result.get("status", ""))
+                        reason = str(result.get("reason", ""))
                         if status in {"indexed", "moved"}:
                             self._stats["indexed"] += 1
                         elif status == "deleted":
                             self._stats["deleted"] += 1
+                        elif reason == "parser_timeout":
+                            self._stats["errors"] += 1
                         else:
                             self._stats["skipped"] += 1
                         self._last_file = str(item.path)
