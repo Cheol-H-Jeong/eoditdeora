@@ -21,6 +21,21 @@ from eoditdeora.utils.logging import get_logger
 log = get_logger(__name__)
 
 
+def _load_documents_by_id(
+    meta: MetaStore | None,
+    doc_ids: list[str],
+    *,
+    log_event: str,
+) -> dict[str, dict[str, Any]]:
+    if meta is None:
+        return {}
+    try:
+        return meta.get_documents(doc_ids)
+    except Exception as e:  # noqa: BLE001
+        log.debug(log_event, doc_ids=len(doc_ids), error=str(e))
+        return {}
+
+
 def lexical_search(query: str, *, top_k: int = 20) -> list[dict[str, Any]]:
     """BM25-only body search.
 
@@ -56,21 +71,15 @@ def lexical_search(query: str, *, top_k: int = 20) -> list[dict[str, Any]]:
             meta = None
 
         try:
+            docs_by_id = _load_documents_by_id(
+                meta,
+                [str(r.get("doc_id", "") or "") for r in rows],
+                log_event="lexical_meta_batch_lookup_failed",
+            )
             results: list[dict[str, Any]] = []
             for r in rows:
                 doc_id = r.get("doc_id", "")
-                doc_row: Any = None
-                if meta is not None:
-                    try:
-                        cur = meta._conn.execute(  # type: ignore[attr-defined]
-                            "SELECT source_path, source_path_display, format, "
-                            "summary_oneline, classification "
-                            "FROM documents WHERE doc_id = ?",
-                            (doc_id,),
-                        )
-                        doc_row = cur.fetchone()
-                    except Exception as e:  # noqa: BLE001
-                        log.debug("lexical_meta_lookup_failed", doc_id=doc_id, error=str(e))
+                doc_row = docs_by_id.get(str(doc_id))
                 text = r.get("text", "") or ""
                 plain, marked = make_snippet(text, query)
                 results.append(

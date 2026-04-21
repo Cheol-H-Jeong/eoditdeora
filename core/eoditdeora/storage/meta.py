@@ -266,6 +266,25 @@ class MetaStore:
         row = cur.fetchone()
         return dict(row) if row else None
 
+    def get_documents(self, doc_ids: list[str]) -> dict[str, dict[str, Any]]:
+        unique_ids: list[str] = []
+        seen: set[str] = set()
+        for doc_id in doc_ids:
+            norm = str(doc_id).strip()
+            if not norm or norm in seen:
+                continue
+            seen.add(norm)
+            unique_ids.append(norm)
+        if not unique_ids:
+            return {}
+
+        placeholders = ", ".join("?" for _ in unique_ids)
+        cur = self._conn.execute(
+            f"SELECT * FROM documents WHERE doc_id IN ({placeholders})",
+            unique_ids,
+        )
+        return {str(row["doc_id"]): dict(row) for row in cur.fetchall()}
+
     def list_documents_under_root(self, root: str) -> list[dict[str, Any]]:
         cur = self._conn.execute(
             "SELECT doc_id, source_path, format FROM documents WHERE root = ?",

@@ -68,6 +68,23 @@ def test_chunks_replace_atomically():
         s.close()
 
 
+def test_get_documents_batches_unique_ids():
+    s = MetaStore()
+    try:
+        doc_a = "sha256:" + "a" * 64
+        doc_b = "sha256:" + "b" * 64
+        s.upsert_document(_record(doc_a, "/tmp/a.txt"))
+        s.upsert_document(_record(doc_b, "/tmp/b.txt"))
+
+        got = s.get_documents([doc_a, "", doc_b, doc_a, "missing"])
+
+        assert set(got) == {doc_a, doc_b}
+        assert got[doc_a]["source_path"] == "/tmp/a.txt"
+        assert got[doc_b]["source_path"] == "/tmp/b.txt"
+    finally:
+        s.close()
+
+
 def test_job_queue_claim_complete():
     s = MetaStore()
     try:

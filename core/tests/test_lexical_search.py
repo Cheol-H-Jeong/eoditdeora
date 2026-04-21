@@ -161,6 +161,50 @@ def test_lexical_search_empty_query_short_circuits() -> None:
     assert lexical_mod.lexical_search("   ") == []
 
 
+def test_lexical_search_batches_meta_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeFts:
+        def search(self, *_a: object, **_k: object) -> list[dict[str, Any]]:
+            return [
+                {"chunk_id": "c1", "doc_id": "d1", "text": "예산 품의서", "score": 2.0},
+                {"chunk_id": "c2", "doc_id": "d2", "text": "예산 승인", "score": 1.0},
+            ]
+
+    class FakeMeta:
+        def __init__(self, *_a: object, **_k: object) -> None:
+            self.calls: list[list[str]] = []
+
+        def get_documents(self, doc_ids: list[str]) -> dict[str, dict[str, Any]]:
+            self.calls.append(doc_ids)
+            return {
+                "d1": {
+                    "source_path": "/tmp/a.txt",
+                    "source_path_display": "/tmp/a.txt",
+                    "format": "txt",
+                    "summary_oneline": "A",
+                    "classification": "품의서",
+                },
+                "d2": {
+                    "source_path": "/tmp/b.txt",
+                    "source_path_display": "/tmp/b.txt",
+                    "format": "txt",
+                    "summary_oneline": "B",
+                    "classification": "보고서",
+                },
+            }
+
+        def close(self) -> None:
+            pass
+
+    fake_meta = FakeMeta()
+    monkeypatch.setattr(lexical_mod, "FtsStore", FakeFts)
+    monkeypatch.setattr(lexical_mod, "MetaStore", lambda: fake_meta)
+
+    results = lexical_mod.lexical_search("예산", top_k=5)
+
+    assert [r["doc_id"] for r in results] == ["d1", "d2"]
+    assert fake_meta.calls == [["d1", "d2"]]
+
+
 @pytest.mark.asyncio
 async def test_search_mode_negative_only_query_returns_hits(
     monkeypatch: pytest.MonkeyPatch,

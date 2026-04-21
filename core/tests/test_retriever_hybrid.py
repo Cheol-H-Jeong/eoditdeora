@@ -166,3 +166,60 @@ def test_reranker_reorders_when_available(monkeypatch: pytest.MonkeyPatch):
 
     assert len(results) == 2
     assert results[0]["score"] == 0.99
+
+
+def test_hybrid_search_batches_meta_lookup(monkeypatch: pytest.MonkeyPatch):
+    class FakeMeta:
+        def __init__(self, *_a: Any, **_k: Any) -> None:
+            self.calls: list[list[str]] = []
+
+        def get_documents(self, doc_ids: list[str]) -> dict[str, dict[str, Any]]:
+            self.calls.append(doc_ids)
+            return {
+                "d1": {
+                    "source_path": "/tmp/a.txt",
+                    "source_path_display": "/tmp/a.txt",
+                    "format": "txt",
+                    "summary_oneline": "A",
+                    "classification": "품의서",
+                },
+                "d2": {
+                    "source_path": "/tmp/b.txt",
+                    "source_path_display": "/tmp/b.txt",
+                    "format": "txt",
+                    "summary_oneline": "B",
+                    "classification": "보고서",
+                },
+            }
+
+        def close(self) -> None:
+            pass
+
+    class FakeFts:
+        def __init__(self, *_a: Any, **_k: Any) -> None:
+            pass
+
+        def search(self, *_a: Any, **_k: Any) -> list[dict[str, Any]]:
+            return [
+                {"chunk_id": "c1", "doc_id": "d1", "text": "예산 초안", "score": 2.0},
+                {"chunk_id": "c2", "doc_id": "d2", "text": "예산 승인", "score": 1.0},
+            ]
+
+    class FakeVectors:
+        def __init__(self, *_a: Any, **_k: Any) -> None:
+            pass
+
+        def search(self, *_a: Any, **_k: Any) -> list[dict[str, Any]]:
+            return []
+
+    fake_meta = FakeMeta()
+    monkeypatch.setattr(hybrid_mod, "MetaStore", lambda: fake_meta)
+    monkeypatch.setattr(hybrid_mod, "FtsStore", FakeFts)
+    monkeypatch.setattr(hybrid_mod, "VectorStore", FakeVectors)
+    monkeypatch.setattr(hybrid_mod, "get_embed_client", lambda: None)
+    monkeypatch.setattr(hybrid_mod, "get_rerank_client", lambda: None)
+
+    results = hybrid_search("예산", top_k=2)
+
+    assert [r["doc_id"] for r in results] == ["d1", "d2"]
+    assert fake_meta.calls == [["d1", "d2"]]

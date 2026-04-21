@@ -35,6 +35,16 @@ class Hit:
     rerank_score: float | None = None
 
 
+def _load_documents_by_id(meta: MetaStore | None, doc_ids: list[str]) -> dict[str, dict[str, Any]]:
+    if meta is None:
+        return {}
+    try:
+        return meta.get_documents(doc_ids)
+    except Exception as e:  # noqa: BLE001
+        log.debug("meta_batch_lookup_failed", doc_ids=len(doc_ids), error=str(e))
+        return {}
+
+
 def _rrf_merge(bm25: list[dict[str, Any]], dense: list[dict[str, Any]]) -> list[Hit]:
     by_chunk: dict[str, Hit] = {}
     for rank, r in enumerate(bm25):
@@ -137,18 +147,9 @@ def hybrid_search(query: str, *, top_k: int = 10) -> list[dict[str, Any]]:
                     pass
 
         results: list[dict[str, Any]] = []
+        docs_by_id = _load_documents_by_id(meta, [h.doc_id for h in candidates[:top_k]])
         for h in candidates[:top_k]:
-            row: Any = None
-            if meta is not None:
-                try:
-                    cur = meta._conn.execute(  # type: ignore[attr-defined]
-                        "SELECT source_path, source_path_display, format, summary_oneline, classification "
-                        "FROM documents WHERE doc_id = ?",
-                        (h.doc_id,),
-                    )
-                    row = cur.fetchone()
-                except Exception as e:  # noqa: BLE001
-                    log.debug("meta_lookup_failed", doc_id=h.doc_id, error=str(e))
+            row = docs_by_id.get(h.doc_id)
             plain, marked = make_snippet(h.text, query)
             results.append(
                 {
