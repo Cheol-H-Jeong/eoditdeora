@@ -134,6 +134,33 @@ export async function ping(): Promise<{ ok: boolean; version: string }> {
   return rpc("ping");
 }
 
+// ---- recent queries / opens --------------------------------------------
+
+export type HistoryQuery = { query: string; last_used_ts: number; count: number };
+export type HistoryOpen = { path: string; last_used_ts: number; count: number };
+export type HistoryTop = {
+  queries?: HistoryQuery[];
+  opens?: HistoryOpen[];
+};
+
+export async function historyTop(opts: {
+  queries?: number;
+  opens?: number;
+} = {}): Promise<HistoryTop> {
+  const kinds: string[] = [];
+  if (opts.queries !== undefined) kinds.push("queries");
+  if (opts.opens !== undefined) kinds.push("opens");
+  return rpc<HistoryTop>("history.top", {
+    kinds: kinds.length ? kinds : ["queries", "opens"],
+    limit_query: opts.queries ?? 5,
+    limit_open: opts.opens ?? 10,
+  });
+}
+
+export async function historyClear(): Promise<{ ok: boolean }> {
+  return rpc<{ ok: boolean }>("history.clear");
+}
+
 // ---- indexer progress ----------------------------------------------------
 
 export type IndexerProgress = {

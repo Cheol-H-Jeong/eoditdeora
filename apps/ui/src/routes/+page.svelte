@@ -6,6 +6,7 @@
     endpointsHealth,
     filesSearch,
     filesStats,
+    historyTop,
     indexerStatus,
     openInOs,
     ping,
@@ -13,6 +14,8 @@
     type EndpointHealth,
     type FastRow,
     type FastStats,
+    type HistoryOpen,
+    type HistoryQuery,
     type IndexerProgress,
     type Role,
     type SearchResponse,
@@ -47,6 +50,19 @@
   let health = $state<Record<Role, EndpointHealth> | null>(null);
   let healthTimer: number | undefined;
 
+  // Recent queries / opens for the empty state.
+  let recentQueries = $state<HistoryQuery[]>([]);
+  let recentOpens = $state<HistoryOpen[]>([]);
+  async function refreshHistory() {
+    try {
+      const r = await historyTop({ queries: 5, opens: 8 });
+      recentQueries = r.queries ?? [];
+      recentOpens = r.opens ?? [];
+    } catch {
+      // history is advisory; silently skip.
+    }
+  }
+
   onMount(async () => {
     try {
       const v = await ping();
@@ -71,6 +87,7 @@
     inputEl?.focus();
     startProgressPoll();
     startHealthPoll();
+    void refreshHistory();
   });
 
   onDestroy(() => {
@@ -264,6 +281,7 @@
       } else if (r.warning === "search_backend_failed") {
         warning = `검색 엔진 오류: ${r.detail ?? "알 수 없음"}`;
       }
+      void refreshHistory();
     } catch (e) {
       errorMessage = String(e);
     } finally {
@@ -488,6 +506,37 @@
             {/if}
           {:else}
             <p class="small">아직 색인된 파일이 없습니다. 오른쪽 설정에서 문서 폴더를 추가하세요.</p>
+          {/if}
+          {#if recentQueries.length || recentOpens.length}
+            <div class="recent">
+              {#if recentQueries.length}
+                <div class="recent-block">
+                  <div class="recent-title">최근 검색어</div>
+                  <div class="recent-row">
+                    {#each recentQueries as rq}
+                      <button class="recent-chip" onclick={() => { query = rq.query; }}>
+                        {rq.query}
+                      </button>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+              {#if recentOpens.length}
+                <div class="recent-block">
+                  <div class="recent-title">최근 열어본 파일</div>
+                  <ul class="recent-paths">
+                    {#each recentOpens as ro}
+                      <li>
+                        <button class="recent-path" onclick={() => openInOs(ro.path)}>
+                          {ro.path.split(/[\\/]/).pop()}
+                          <span class="recent-dir">{ro.path.split(/[\\/]/).slice(0, -1).join("/") || "/"}</span>
+                        </button>
+                      </li>
+                    {/each}
+                  </ul>
+                </div>
+              {/if}
+            </div>
           {/if}
         </div>
       {/if}
@@ -783,6 +832,43 @@
     border-radius: 6px;
     background: #1f2330;
     color: #8ab4ff;
+  }
+  .recent { margin-top: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .recent-title { font-size: 11px; color: #6b7280; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .recent-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .recent-chip {
+    background: #1a1f2e;
+    border: 1px solid #2a3550;
+    color: #8ab4ff;
+    border-radius: 12px;
+    padding: 3px 10px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .recent-chip:hover { border-color: #4b7bff; }
+  .recent-paths { list-style: none; margin: 0; padding: 0; }
+  .recent-paths li { padding: 2px 0; }
+  .recent-path {
+    background: transparent;
+    border: 0;
+    text-align: left;
+    color: #e8e8ea;
+    font-size: 12px;
+    cursor: pointer;
+    padding: 4px 0;
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    width: 100%;
+  }
+  .recent-path:hover { color: #8ab4ff; }
+  .recent-dir {
+    color: #6b7280;
+    font-size: 10.5px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   /* file (name) results */
