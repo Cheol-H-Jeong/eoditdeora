@@ -647,7 +647,7 @@
             </button>
           {/each}
         </section>
-      {:else if contentResponse && !loading}
+      {:else if contentResponse && !loading && !warning}
         <div class="status">결과 없음. 본문 색인이 아직일 수 있습니다.</div>
       {:else if !query.trim()}
         <div class="hint-panel">
