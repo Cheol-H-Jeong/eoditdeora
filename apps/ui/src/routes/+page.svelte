@@ -6,6 +6,7 @@
     endpointsHealth,
     filesSearch,
     filesStats,
+    formatRpcError,
     historyTop,
     indexerStatus,
     openInOs,
@@ -68,7 +69,7 @@
       const v = await ping();
       version = v.version;
     } catch (e) {
-      errorMessage = `Sidecar not reachable: ${e}`;
+      errorMessage = formatRpcError(e);
     }
     try {
       stats = await filesStats();
@@ -262,7 +263,7 @@
         warning = "아직 색인된 파일이 없습니다. 설정에서 문서 폴더를 추가하거나 잠시 기다려주세요.";
       }
     } catch (e) {
-      errorMessage = String(e);
+      errorMessage = formatRpcError(e);
     } finally {
       loading = false;
     }
@@ -283,7 +284,7 @@
       }
       void refreshHistory();
     } catch (e) {
-      errorMessage = String(e);
+      errorMessage = formatRpcError(e);
     } finally {
       loading = false;
     }

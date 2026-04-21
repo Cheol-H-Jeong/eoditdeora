@@ -1,5 +1,63 @@
 import { invoke } from "@tauri-apps/api/core";
 
+export type RpcInvokeError = {
+  kind?: string;
+  message?: string;
+  code?: number;
+  data?: {
+    role?: string;
+    url?: string;
+    status?: number;
+    detail?: string;
+  } | null;
+};
+
+function isRpcInvokeError(value: unknown): value is RpcInvokeError {
+  return typeof value === "object" && value !== null && "message" in value;
+}
+
+function roleLabel(role: unknown): string {
+  switch (role) {
+    case "llm":
+      return "답변";
+    case "embed":
+      return "임베딩";
+    case "rerank":
+      return "재정렬";
+    default:
+      return "추론";
+  }
+}
+
+export function formatRpcError(error: unknown): string {
+  if (isRpcInvokeError(error)) {
+    const code = error.code;
+    const role = roleLabel(error.data?.role);
+    if (code === -32010) {
+      return `${role} 서버 API 키가 없거나 유효하지 않습니다. 설정에서 키를 확인하세요.`;
+    }
+    if (code === -32011) {
+      return `${role} 서버 주소 또는 모델 ID를 찾을 수 없습니다. 설정 값을 확인하세요.`;
+    }
+    if (code === -32012) {
+      return `${role} 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인하세요.`;
+    }
+    if (code === -32013) {
+      return `${role} 서버 응답 형식이 올바르지 않습니다. OpenAI 호환 API인지 확인하세요.`;
+    }
+    if (typeof error.message === "string" && error.message.trim()) {
+      return error.message;
+    }
+  }
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  return "알 수 없는 오류가 발생했습니다.";
+}
+
 /**
  * Call the Python sidecar through the Tauri shell.
  * The Rust side enforces framing and id matching; the JS side only cares

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
-use crate::rpc::SidecarState;
+use crate::rpc::{RpcInvokeError, SidecarState};
 
 #[derive(serde::Serialize)]
 struct PingResponse {
@@ -22,11 +22,8 @@ async fn rpc_call(
     state: tauri::State<'_, SidecarState>,
     method: String,
     params: serde_json::Value,
-) -> Result<serde_json::Value, String> {
-    state
-        .call(&method, params)
-        .await
-        .map_err(|e| format!("rpc_call: {e:#}"))
+) -> Result<serde_json::Value, RpcInvokeError> {
+    state.call(&method, params).await
 }
 
 #[tauri::command]

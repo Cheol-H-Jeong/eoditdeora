@@ -14,6 +14,7 @@
     endpointsTest,
     endpointsUpdate,
     filesStats,
+    formatRpcError,
     getSettings,
     indexDiskUsage,
     indexReset,
@@ -143,7 +144,7 @@
       selectedExtensions = s.index.extensions;
       extSaveMsg = `${selectedExtensions.length}개 확장자 저장됨. 새 확장자는 '재탐색'으로 반영하세요.`;
     } catch (e) {
-      extSaveMsg = String(e);
+      extSaveMsg = formatRpcError(e);
     } finally {
       busy = { ...busy, extsave: false };
     }
@@ -220,7 +221,7 @@
         : "추가할 새 폴더가 없습니다.";
       await refreshRuntime();
     } catch (e) {
-      rescanMsg = String(e);
+      rescanMsg = formatRpcError(e);
     } finally {
       busy = { ...busy, addDefaults: false };
     }
@@ -234,7 +235,7 @@
       rescanMsg = `재탐색 완료 — ${r.totals.roots}개 폴더, ${r.totals.upserted.toLocaleString()}개 파일 색인.`;
       await refreshRuntime();
     } catch (e) {
-      rescanMsg = String(e);
+      rescanMsg = formatRpcError(e);
     } finally {
       busy = { ...busy, rescan: false };
     }
@@ -250,7 +251,7 @@
       resetMsg = `초기화 완료 · ${formatBytes(result.deleted_bytes)} 삭제 · ${result.restarted ? "재시작됨" : "재시작 실패"}`;
       await refreshRuntime();
     } catch (e) {
-      resetMsg = String(e);
+      resetMsg = formatRpcError(e);
     } finally {
       busy = { ...busy, resetIndex: false };
     }
@@ -348,7 +349,7 @@
       await refreshEndpoints();
       await refreshRuntime();
     } catch (e) {
-      autoConnectMsg = String(e);
+      autoConnectMsg = formatRpcError(e);
     } finally {
       autoConnecting = false;
     }

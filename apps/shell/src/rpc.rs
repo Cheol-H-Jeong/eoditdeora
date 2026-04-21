@@ -19,6 +19,51 @@ use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 use tokio::sync::{oneshot, Mutex};
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct RpcInvokeError {
+    pub kind: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct RpcResponseError {
+    code: i64,
+    message: String,
+    #[serde(default)]
+    data: Option<serde_json::Value>,
+}
+
+impl RpcInvokeError {
+    fn rpc(code: i64, message: String, data: Option<serde_json::Value>) -> Self {
+        Self {
+            kind: "rpc".to_string(),
+            message,
+            code: Some(code),
+            data,
+        }
+    }
+
+    fn shell(message: impl Into<String>) -> Self {
+        Self {
+            kind: "shell".to_string(),
+            message: message.into(),
+            code: None,
+            data: None,
+        }
+    }
+
+    fn from_value(value: serde_json::Value) -> Self {
+        match serde_json::from_value::<RpcResponseError>(value.clone()) {
+            Ok(err) => Self::rpc(err.code, err.message, err.data),
+            Err(_) => Self::shell(format!("rpc_error: {value}")),
+        }
+    }
+}
+
 pub struct SidecarState {
     next_id: AtomicI64,
     pending: Arc<Mutex<HashMap<i64, oneshot::Sender<serde_json::Value>>>>,
@@ -98,7 +143,11 @@ impl SidecarState {
         })
     }
 
-    pub async fn call(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
+    pub async fn call(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, RpcInvokeError> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         {
@@ -119,11 +168,13 @@ impl SidecarState {
             let mut child = self.child.lock().await;
             child
                 .write(&framed)
-                .map_err(|e| anyhow!("sidecar write: {e:#}"))?;
+                .map_err(|e| RpcInvokeError::shell(format!("sidecar write: {e:#}")))?;
         }
-        let value = rx.await.map_err(|_| anyhow!("sidecar response channel closed"))?;
+        let value = rx
+            .await
+            .map_err(|_| RpcInvokeError::shell("sidecar response channel closed"))?;
         if let Some(err) = value.get("error") {
-            return Err(anyhow!("rpc_error: {}", err));
+            return Err(RpcInvokeError::from_value(err.clone()));
         }
         Ok(value
             .get("result")
@@ -186,3 +237,30 @@ trait Tap: Sized {
     }
 }
 impl<T> Tap for T {}
+
+#[cfg(test)]
+mod tests {
+    use super::RpcInvokeError;
+    use serde_json::json;
+
+    #[test]
+    fn rpc_invoke_error_preserves_structured_rpc_fields() {
+        let err = RpcInvokeError::from_value(json!({
+            "code": -32010,
+            "message": "API 키가 필요합니다",
+            "data": {"role": "llm", "status": 401}
+        }));
+        assert_eq!(err.kind, "rpc");
+        assert_eq!(err.code, Some(-32010));
+        assert_eq!(err.message, "API 키가 필요합니다");
+        assert_eq!(err.data, Some(json!({"role": "llm", "status": 401})));
+    }
+
+    #[test]
+    fn rpc_invoke_error_falls_back_for_unstructured_payloads() {
+        let err = RpcInvokeError::from_value(json!(["oops"]));
+        assert_eq!(err.kind, "shell");
+        assert_eq!(err.code, None);
+        assert!(err.message.contains("rpc_error"));
+    }
+}
